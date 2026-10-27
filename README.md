@@ -1,15 +1,24 @@
-### Welcome to KuruMacro
----
-> A auto-play tools for my favorite Roblox Games
-Was polished on 23/4/2025, based on community macro
----
-## Here's some details
-| Games                        | Status      |
-|-----------------------------:|-------------|
-| Anime Adventrure             | On-going    |
-| Anime Universal Tower Defense| Game closed |
-| Anime Rangers                | Outdated    |
-| Anime Vanguard               | Outdated    |
+# ⚡ Welcome to KuruMacro
 
-## Technical
-- using Auto Hotkey V2 with GUI, Functioning and open-sources
+> An open-source auto-play macro tool for my favorite Roblox games.  
+> *Polished on April 23, 2025 — Built upon community macros.*
+
+![AutoHotkey](https://img.shields.io/badge/AutoHotkey-v2.0-green?style=flat-square&logo=autohotkey)
+
+---
+
+## 🎮 Supported Games
+
+| Game | Status |
+| :--- | :---: |
+| **Anime Adventures** | Active / Ongoing |
+| **Anime Rangers** | Outdated |
+| **Anime Vanguards** | Outdated |
+| **Anime Universal Tower Defense** | Discontinued (Game Closed) |
+
+---
+
+## 🛠️ Technical Details
+- **Core Engine:** Powered by **AutoHotkey v2 (AHK v2)**.
+- **Interface:** Includes a clean, user-friendly **Custom GUI**.
+- **Transparency:** 100% functional and **open-source**.
