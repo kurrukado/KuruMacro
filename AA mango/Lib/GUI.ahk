@@ -11,7 +11,7 @@ if (A_ScriptFullPath = A_LineFile) {
 
 ; Basic Application Info
 global aaTitle := "KuruMacro Anime Adventures "
-global version := "v2.1"
+global version := "v3.0"
 global rblxID := "ahk_exe RobloxPlayerBeta.exe"
 ;Coordinate and Positioning Variables
 global targetWidth := 816
