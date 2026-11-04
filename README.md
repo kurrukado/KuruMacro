@@ -1,4 +1,4 @@
-# ⚡ Welcome to KuruMacro
+# Welcome to KuruMacro
 
 > An open-source auto-play macro tool for my favorite Roblox games.  
 > *Polished on April 23, 2025 — Built upon community macros.*
@@ -12,9 +12,9 @@
 | Game | Status |
 | :--- | :---: |
 | **Anime Adventures** | Active / Ongoing |
-| **Anime Rangers** | Outdated |
+| **Anime Rangers** | Discontinue |
 | **Anime Vanguards** | Outdated |
-| **Anime Universal Tower Defense** | Discontinued (Game Closed) |
+| **Anime Universal Tower Defense** | Discontinue |
 
 ---
 
