@@ -170,3 +170,10 @@
 - **Hạ tầng**: `AA-mango-dev\check-invariants.ps1` (validate + CAPTCHA call sites + 10 mode + MouseClick + git hygiene); `.gitignore`; git init + baseline commit.
 - **Bằng chứng**: Validate `exit=0`; `check-invariants.ps1` -> `RESULT: PASS`.
 - **Chưa xác nhận**: Không chạy live; chỉ đổi tài liệu/log + git, không đổi logic game.
+## 2026-11-04: GitHub -AR/AV/UTD chuy���n t�� zip sang folder source
+
+- **GitHub**: AR mango/, AV mango/, UTD mango/ gi��� gi��� nguyA�n c��y `Lib`/`Images`/`Main.ahk`; xA3a `AR/AV/UTD mango.zip` kh���i HEAD (v���n cA3n trong l���ch s���).
+- **`.gitignore`**: thA�m `* mango/Settings/` vA� `* mango/Logs/`; gi���i nA�n zip cA3 lo���i `Settings/` (ch���a webhook Discord th���t) vA� `Logs/`.
+- **`README.md`**: thA�m m���c Download, gi���i thA-ch cAch GitHub hi���n folder vA� nA�t Download ZIP.
+- **B���ng ch���cng**: `/Validate` c���a `AR/AV/UTD Main.ahk` -> `exit=0`; `git ls-tree -r origin/main` -> 226 file, 0 `Settings/` ho���c `Logs/`; push fast-forward `cf3b45b..0a5ebc5`.
+- **Ch��a xA�c nh���n**: Ch��a ch���y live AR/AV/UTD. Webhook cA9 v���n n���m trong l���ch s��� git cA9 -> ph���i rotate trA�n Discord.
