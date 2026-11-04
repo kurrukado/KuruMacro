@@ -33,3 +33,6 @@ AA-mango-dev/upgrade-no-hotbar/
 Thumbs.db
 desktop.ini
 .vscode/
+
+# Test-local settings fixtures
+AA-mango-dev/Tests/**/Settings/
