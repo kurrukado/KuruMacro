@@ -1,11 +1,13 @@
 # --- Secrets / runtime state (never commit) ---
 AA mango/Settings/
+* mango/Settings/
 AA-mango-dev/Settings/
 *.key
 *.token
 
 # --- Logs ---
 AA mango/Logs/
+* mango/Logs/
 *.log
 
 # --- Dev artifacts ---
