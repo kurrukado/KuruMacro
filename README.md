@@ -12,9 +12,9 @@
 | Game | Status |
 | :--- | :---: |
 | **Anime Adventures** | Active / Ongoing |
-| **Anime Rangers** | Discontinue |
+| **Anime Rangers** | Discontinued |
 | **Anime Vanguards** | Outdated |
-| **Anime Universal Tower Defense** | Discontinue |
+| **Anime Universal Tower Defense** | Discontinued |
 
 ---
 
