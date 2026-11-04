@@ -1,3 +1,0 @@
-﻿h_exe=0 h_roblox=0 pname=none
-h_exe=0 h_roblox=0 pname=none
-h_exe=0 h_roblox=0 pname=none

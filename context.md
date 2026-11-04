@@ -177,3 +177,11 @@
 - **`README.md`**: thA�m m���c Download, gi���i thA-ch cAch GitHub hi���n folder vA� nA�t Download ZIP.
 - **B���ng ch���cng**: `/Validate` c���a `AR/AV/UTD Main.ahk` -> `exit=0`; `git ls-tree -r origin/main` -> 226 file, 0 `Settings/` ho���c `Logs/`; push fast-forward `cf3b45b..0a5ebc5`.
 - **Ch��a xA�c nh���n**: Ch��a ch���y live AR/AV/UTD. Webhook cA9 v���n n���m trong l���ch s��� git cA9 -> ph���i rotate trA�n Discord.
+## 2026-11-04: Chi publish folder - .gitignore + pre-commit guard + alias git pub
+
+- **`.gitignore`**: viết lại thành danh sách chặn (`* mango/Settings/`, `* mango/Logs/`, `AA-mango-dev/`, `*.zip`, `*.key/.token/.env`, `*.log`) để `git add -A` không bao giờ chạm file cấm.
+- **`.githooks/pre-commit`**: chặn path cấm (Settings/Logs/Debug/backup/AA-mango-dev/zip), chặn webhook/key/private key trong nội dung staged, chặn file > 10 MB. Đã test: probe `AA mango/Settings/__probe.txt`, `probe.zip` và webhook giả đều bị chặn (exit=1).
+- **`.githooks/publish.sh` + alias `git pub`**: `git add -A` -> `git commit -m` -> `git push` trong một lệnh.
+- **Git**: bỏ track `AA-mango-dev` (62 file) khỏi repo; 470 file vẫn còn trên đĩa. `git config core.hooksPath .githooks`.
+- **Bằng chứng**: `git ls-files` chỉ còn `.agents`, 4 folder macro, 5 file .md + `.gitignore`; `check-invariants.ps1` -> `RESULT: PASS`.
+- **Chưa xác nhận**: Hook chỉ chạy trên máy này (`core.hooksPath` là config local); máy khác clone về phải set lại.

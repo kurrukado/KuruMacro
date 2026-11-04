@@ -27,6 +27,18 @@ To grab everything as a single archive, use the green **Code → Download ZIP** 
 Runtime folders (`Settings/`, `Logs/`) are intentionally not included — they hold
 webhooks and account-specific config, so create them on first launch.
 
+Only these paths are published:
+
+```
+AA mango/  AR mango/  AV mango/  UTD mango/  .agents/
+AGENTS.md  ARCHITECTURE.md  README.md  context.md  .gitignore
+```
+
+`AA-mango-dev/` (test harness, probes, backups) and anything under `Settings/`
+or `Logs/` stays local. `.githooks/pre-commit` refuses those paths and any
+secret-looking string, so `git pub "message"` (add + commit + push) is safe
+without picking files by hand.
+
 ---
 
 ## 🛠️ Technical Details

@@ -1,0 +1,70 @@
+#!/bin/sh
+# ============================================================
+#  pre-commit guard for D:\Macro
+#  Runs automatically before every commit once core.hooksPath
+#  is set to .githooks (one-time, see README).
+#
+#  Blocks:
+#    1. any path that must never be published
+#    2. webhooks, API keys, private keys inside staged content
+#    3. files larger than 10 MB
+#
+#  Intentional bypass:  git commit --no-verify
+# ============================================================
+
+set -u
+
+fail() {
+    echo "" >&2
+    echo "pre-commit: BLOCKED - $1" >&2
+    echo "" >&2
+}
+
+# ---------------------------------------------------------- 1. paths
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -n "$staged" ]; then
+    blocked=$(printf '%s\n' "$staged" | grep -E \
+        '(^|/)(Settings|Logs|Debug|backup)/|^AA-mango-dev/|\.(key|token|env|zip|7z)$')
+    if [ -n "$blocked" ]; then
+        fail "these paths are not allowed in a commit:"
+        printf '%s\n' "$blocked" | sed 's/^/    /' >&2
+        echo "Unstage them with:  git restore --staged <file>" >&2
+        exit 1
+    fi
+fi
+
+# ---------------------------------------------------------- 2. secrets
+hits=$(git grep --cached -n -I -E \
+    'discord(app)?\.com/api/webhooks/[0-9]{15,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}' \
+    -- . 2>/dev/null)
+
+if [ -n "$hits" ]; then
+    fail "staged content looks like it contains a secret:"
+    printf '%s\n' "$hits" | cut -c1-160 | sed 's/^/    /' >&2
+    echo "Remove the secret, or rotate it before committing." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------- 3. size
+big=""
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
+    size=$(wc -c < "$f" 2>/dev/null || echo 0)
+    if [ "$size" -gt 10485760 ]; then
+        big="${big}    $f ($((size / 1048576)) MB)
+"
+    fi
+done <<EOF
+$staged
+EOF
+
+if [ -n "$big" ]; then
+    fail "these files are larger than 10 MB:"
+    printf '%s' "$big" >&2
+    echo "Git keeps every version forever; keep big binaries out of the repo." >&2
+    exit 1
+fi
+
+exit 0

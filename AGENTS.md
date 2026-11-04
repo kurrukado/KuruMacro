@@ -149,7 +149,11 @@ Không nói “đã fix” nếu không có bằng chứng. Không dùng “có 
 - `ARCHITECTURE.md`: kiến trúc + luồng 5 giai đoạn. Chỉ đọc khi cần.
 - `AgentOnly.md`: **đã bỏ** (archive ở `AA-mango-dev\archive\`). Không tạo lại bảng nhãn hàm.
 - Git: `main` là bản ổn định; làm việc trên `agent/<chu-de>`; commit nhỏ, message rõ.
-- Không commit `Settings/`, `Logs/`, `AA-mango-dev/Debug/`, `backup/`, file `.json/.png` sinh ra khi test.
+- **Chỉ publish folder**: `AA mango/`, `AR mango/`, `AV mango/`, `UTD mango/`, `.agents/`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `context.md`, `.gitignore`.
+  `AA-mango-dev/` là cây dev, **không track**; file vẫn nằm trên đĩa và vẫn dùng bình thường.
+- Publish một lệnh: `git pub "area: việc đã làm"` (add + commit + push). Không chọn file tay.
+- `.githooks/pre-commit` chặn `Settings/`, `Logs/`, `Debug/`, `backup/`, `AA-mango-dev/`, `.zip`, và mọi chuỗi giống webhook/key. Bypass chỉ khi thật sự cần: `--no-verify`.
+- Không commit `Settings/`, `Logs/`, `AA-mango-dev/`, `backup/`, file `.json/.png` sinh ra khi test.
 - Trước khi commit: `git status` + `git diff` phải đúng phạm vi. Không commit file lạ.
 - Không `git push --force` lên `main`. Không commit bí mật.
 

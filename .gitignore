@@ -1,40 +1,31 @@
-# --- Secrets / runtime state (never commit) ---
-AA mango/Settings/
+# ============================================================
+#  .gitignore - the publish whitelist, inverted.
+#  Anything listed here can never be added by `git add -A`,
+#  so `git add -A && git commit && git push` stays safe.
+#  Tracked files are NOT affected: use `git rm --cached` first.
+# ============================================================
+
+# --- Secrets / runtime state (per-machine, never publish) ---
 * mango/Settings/
-AA-mango-dev/Settings/
 *.key
 *.token
+*.env
 
-# --- Logs ---
-AA mango/Logs/
+# --- Logs and captured screens ---
 * mango/Logs/
 *.log
+_Debug/
 
-# --- Dev artifacts ---
-AA-mango-dev/Debug/
-AA-mango-dev/backup/
-AA-mango-dev/SumnmerCards/
-AA-mango-dev/*.json
-AA-mango-dev/*.png
-AA-mango-dev/latest.json
-AA-mango-dev/.temp_observation.log
+# --- Dev-only tree: harness, probes, snapshots, backups ---
+# Kept on disk. Never published; use it for test copies instead of branches.
+AA-mango-dev/
 
-# --- One-off snapshot folders (kept on disk, not in git) ---
-AA-mango-dev/basic-settings-ui/
-AA-mango-dev/gemini-rollback/
-AA-mango-dev/jev-once-per-offer/
-AA-mango-dev/match-leaderboard/
-AA-mango-dev/prod-combined-*/
-AA-mango-dev/summer-captcha/
-AA-mango-dev/summer-captcha-f2/
-AA-mango-dev/summer-captcha-ui/
-AA-mango-dev/unit-upgrade-ui/
-AA-mango-dev/upgrade-no-hotbar/
+# --- Build output ---
+*.zip
+*.7z
 
 # --- OS / editor ---
 Thumbs.db
 desktop.ini
 .vscode/
-
-# Test-local settings fixtures
-AA-mango-dev/Tests/**/Settings/
+.idea/
