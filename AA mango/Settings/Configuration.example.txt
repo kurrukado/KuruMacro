@@ -1,0 +1,41 @@
+; Mau cau hinh. File that la Settings\Configuration.txt - macro tu ghi khi
+; bam Save trong GUI. Khong doi ten file nay thanh Configuration.txt tru khi
+; ban muon dat san gia tri mac dinh.
+;
+; Dang dong bat dau bang ';' se bi bo qua.
+Mode=Infinite
+Map=Planet Greenie
+
+Enabled1=1
+Enabled2=1
+Enabled3=1
+Enabled4=1
+Enabled5=1
+Enabled6=1
+
+Placement1=1
+Placement2=1
+Placement3=1
+Placement4=1
+Placement5=1
+Placement6=1
+Matchmaking=0
+ReturnToLobby=0
+Priority1=1
+Priority2=2
+Priority3=3
+Priority4=4
+Priority5=5
+Priority6=6
+Pos1=Pos 1
+Pos2=Pos 2
+Pos3=Pos 3
+Pos4=Pos 4
+Pos5=Pos 5
+Pos6=Pos 6
+MaxLevel1=OFF
+MaxLevel2=OFF
+MaxLevel3=OFF
+MaxLevel4=OFF
+MaxLevel5=OFF
+MaxLevel6=OFF

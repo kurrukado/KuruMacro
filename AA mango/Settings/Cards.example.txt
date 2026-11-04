@@ -1,0 +1,11 @@
+# Cards.txt - thuoc tinh the bai
+# Format: <ten the> | <type> | <score> | <ghi chu>
+#   type : buff | nerf | mixed | unknown
+#   score: -100..100  (buff duong, nerf am)
+# Ten khong phan biet hoa thuong, bo qua dau cau.
+#
+# Day chi la mau. File that la Settings\Cards.txt, do macro tu ghi khi
+# hoc duoc the moi. Dong bat dau bang '#' se bi bo qua.
+#
+# Vi du:
+# Sun God | buff | 10 | tang sat thuong

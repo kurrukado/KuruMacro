@@ -24,8 +24,8 @@ Each game lives in its own folder (`AA mango/`, `AR mango/`, `AV mango/`, `UTD m
 Open a folder to browse or read the `.ahk` source directly on GitHub.
 
 To grab everything as a single archive, use the green **Code → Download ZIP** button.
-Runtime folders (`Settings/`, `Logs/`) are intentionally not included — they hold
-webhooks and account-specific config, so create them on first launch.
+`Settings/` ships as blank `*.example.txt` templates — no webhook, API key,
+Discord ID or private server. The macro writes the real files on first run.
 
 Only these paths exist in this repository:
 
@@ -33,9 +33,9 @@ Only these paths exist in this repository:
 AA mango/  AR mango/  AV mango/  UTD mango/  README.md
 ```
 
-`Settings/`, `Logs/`, the test harness and the publishing tooling are kept
-local and never committed. `Code → Download ZIP` therefore contains just the
-four macro folders plus this README, ready to run.
+`Settings/` contains only blank templates. `Logs/`, the test harness and the
+publishing tooling stay local, so `Code → Download ZIP` gives just the four
+macro folders, their `Settings/*.example.txt` files and this README.
 
 ---
 
