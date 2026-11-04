@@ -161,3 +161,12 @@
 - 2026-11-04: User duyệt đưa Settings UI và leaderboard lên PROD. BasicSetup bấm (565,73) trong trận. TpSpawn tìm Teleport back to Spawn bằng OCR, giữ giá trị Disable Auto-Open Upgrade UI. /Validate exit=0, hash khớp DEV. Chưa chạy luồng mới trong Roblox. Backup: D:\Macro\AA-mango-dev\basic-settings-ui\GameMango.prod-20261104-085902.ahk
 
 - 2026-11-04: User duyệt hai diff JEV một yêu cầu mỗi bảng thẻ và UI nâng cấp UPG [n] (MAX). Đã ghép và áp dụng lên PROD, /Validate exit=0, hash khớp bản ghép DEV. Chưa thử trong Roblox. Backup: D:\Macro\AA-mango-dev\prod-combined-20261104-091021\GameMango.before.ahk
+
+## 2026-11-04: Tái cấu trúc tài liệu agent + git baseline + invariant check
+
+- **Tài liệu**: `AGENTS.md` thành nguồn luật duy nhất (quyền tự chủ, bất biến, định nghĩa xong); `ARCHITECTURE.md` giữ kiến trúc/luồng 5 giai đoạn; `AgentOnly.md` archive sang `AA-mango-dev\archive\AgentOnly-2026-11-04.md` và bỏ khỏi luồng đọc; `.agents\rules\aa-mango-rules.md` chỉ còn trỏ về AGENTS.md.
+- **Skill**: `aa-macro` cập nhật path `D:\Macro\AA mango`, bỏ yêu cầu đọc AgentOnly, thêm quy tắc "việc nhỏ đảo ngược được thì làm rồi báo"; copy sang `C:\Users\thoan\.codex\skills\aa-macro\SKILL.md`.
+- **Code**: `Functions.ahk:CaptchaDetect` không còn log nội dung CAPTCHA (`"Sending number: "` -> `"Da nhap ma xac minh"`).
+- **Hạ tầng**: `AA-mango-dev\check-invariants.ps1` (validate + CAPTCHA call sites + 10 mode + MouseClick + git hygiene); `.gitignore`; git init + baseline commit.
+- **Bằng chứng**: Validate `exit=0`; `check-invariants.ps1` -> `RESULT: PASS`.
+- **Chưa xác nhận**: Không chạy live; chỉ đổi tài liệu/log + git, không đổi logic game.

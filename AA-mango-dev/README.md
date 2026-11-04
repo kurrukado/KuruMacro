@@ -1,10 +1,10 @@
 # AA mango dev harness
 
-Công cụ debug nằm **hoàn toàn ngoài** `C:\Users\thoan\Downloads\AA mango`.
+Công cụ debug nằm **hoàn toàn ngoài** `D:\Macro\AA mango`.
 Trong thư mục macro chỉ có 4 file `.ahk` được sửa, không thêm file nào.
 
 ```
-C:\Users\thoan\Downloads\AA-mango-dev\
+D:\Macro\AA-mango-dev\
 ├─ Harness\
 │  ├─ Snapshot.ahk      chụp vùng client của Roblox (+ lưới 100px)
 │  ├─ Calibrate.ahk     kéo chuột khoanh icon -> PNG + toạ độ client
@@ -26,7 +26,7 @@ thư mục thì sửa 2 dòng đầu file đó.
 
 ```powershell
 $ahk = "C:\Users\thoan\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe"
-$dev = "C:\Users\thoan\Downloads\AA-mango-dev"
+$dev = "D:\Macro\AA-mango-dev"
 
 # 1. Xem agent đang thấy gì (chạy xong tự thoát)
 & $ahk "$dev\Harness\Snapshot.ahk" --auto
@@ -118,7 +118,7 @@ Giữ Nexus để lái editor / Notepad / file dialog. Cho game thì `windows-mc
 
 ## AGENT INSTRUCTIONS (English)
 
-- Never add files inside `C:\Users\thoan\Downloads\AA mango`. Only edit existing
+- Never add files inside `D:\Macro\AA mango`. Only edit existing
   `.ahk` files there.
 - To see the screen: run `Snapshot.ahk --auto`, then read `Debug\latest.json`
   and the `_raw.png`. Coordinates in that PNG are client coordinates, 1:1.
@@ -142,7 +142,7 @@ Skill được nạp theo `description` khi câu hỏi khớp. Phải **restart 
 ## Kiểm tra syntax toàn bộ
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\thoan\Downloads\AA-mango-dev\check-syntax.ps1"
+powershell -ExecutionPolicy Bypass -File "D:\Macro\AA-mango-dev\check-syntax.ps1"
 ```
 
 Dùng `AutoHotkey64.exe /ErrorStdOut /Validate` — load rồi thoát, **không chạy**,

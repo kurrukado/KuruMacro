@@ -1,126 +1,156 @@
-# AGENTS.md — Anime Adventures AutoHotkey Macro (KuruMacro / Mango)
+# AGENTS.md — AA mango (Anime Adventures AutoHotkey macro)
 
-Tài liệu hướng dẫn tổng quan dự án, bản đồ kiến trúc hệ thống và vòng đời hoạt động dành cho AI Agent.
+Đây là **nguồn luật duy nhất** cho mọi agent làm việc trong `D:\Macro`.
+Không có file luật thứ hai. Nếu luật ở đây mâu thuẫn với code, **code là sự thật** — báo lại để sửa file này.
 
----
-
-## 1. Giới thiệu dự án (Project Overview)
-
-- **Tên dự án**: Anime Adventures Mango Macro (AHK v2.0).
-- **Mục tiêu**: Tự động hóa hoàn toàn chu trình chơi tựa game **Anime Adventures trên Roblox** mà không cần người dùng can thiệp (chạy liên tục, cắm máy nhiều giờ/ngày).
-
-- **Các tác vụ macro thực hiện**:
-  1. Tự động di chuyển trong sảnh (Lobby) đến từng chế độ được chọn.
-  2. Tự động chọn chế độ, chọn map muốn chơi, xử lý vào phòng Solo (`Play Here`) hoặc Ghép đội (`Find Match`).
-  3. **Tự động nhận diện và nhập Captcha số** khi tham gia chế độ ghép đội.
-  4. Căn góc camera nhìn từ trên xuống, di chuyển nhân vật đến vị trí đặt quân chiến thuật trên từng map.
-  5. Đặt quân (Unit Placement) theo tọa độ đã lưu hoặc thuật toán quét đường tròn 64 điểm.
-  6. Tự động kiểm tra trạng thái và nâng cấp quân (Upgrade Units) theo thứ tự ưu tiên và giới hạn cấp độ.
-  7. Tự động phát hiện và kích hoạt kỹ năng nhân vật (Auto Ability).
-  8. Xử lý màn hình chọn thẻ bài / buff (Event Card Picker) bằng OCR và thuật toán blueprint.
-  9. Nhận diện kết thúc trận (Victory / Defeat), gửi thông báo Discord Webhook và điều hướng Replay hoặc Return to Lobby để lặp lại chu trình.
+Mục tiêu: sửa đúng, nhỏ, có bằng chứng, không phá tính năng đang chạy. Không cần xin phép cho việc nhỏ, có thể đảo ngược, đã có test.
 
 ---
 
-## 2. Công nghệ cốt lõi (Technology Stack)
+## 0. Đọc gì trước khi làm
 
-- **Ngôn ngữ**: [AutoHotkey v2](https://www.autohotkey.com/v2/) (Trình thông dịch 64-bit tại `C:\Users\thoan\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe`).
-- **Xử lý đồ họa & Nhận diện**:
-  - `FindText`: Thư viện nhận diện mẫu pixel / hình ảnh / chữ nhị phân cực nhanh không cần lưu file ảnh rời.
-  - `Windows.Media.Ocr` (`OCR-main`): Tích hợp Windows OCR engine để đọc văn bản động (tên map, số Captcha, nội dung thẻ bài, cấp độ nâng cấp).
-  - `GDI+` (`AHKv2-Gdip-master`): Chụp màn hình client Roblox trực tiếp từ bộ nhớ phục vụ xử lý ảnh.
-- **Tương tác Input đặc thù Roblox**:
-  - Roblox DirectInput bỏ qua các lệnh `MouseClick` / `SendInput` thông thường. Macro sử dụng cơ chế `SendMode "Event"` kết hợp helper `FixClick` (di chuyển $\rightarrow$ rung nhẹ 1px $\rightarrow$ click) và `FixMove` (di chuyển $\rightarrow$ rung 1px trước khi cuộn chuột) để đảm bảo game không nuốt thao tác.
-- **Tích hợp mở rộng**: Discord Webhook để gửi báo cáo thắng/thua, thời gian hoàn thành màn chơi kèm ảnh chụp.
+1. File này (AGENTS.md).
+2. 60 dòng cuối `D:\Macro\context.md` — chỉ để biết thay đổi gần nhất.
+3. `grep` đúng tên hàm trong `D:\Macro\AA mango\Lib\*.ahk`.
+
+**Không đọc** toàn bộ `context.md`, không đọc archive, không đọc `ARCHITECTURE.md` trừ khi task là về kiến trúc/luồng tổng thể.
+Nếu task chỉ là quan sát màn hình (click, chụp, xem UI), bỏ qua bước đọc code.
 
 ---
 
-## 3. Kiến trúc thư mục & Bản đồ Module (Project Architecture)
+## 1. Đường dẫn và lệnh chuẩn
 
-Dự án được phân cấp thành 2 phân vùng:
-
-### 🔴 Phân vùng PROD (`D:\Macro\AA mango`) — Hệ thống chính thức
-Đây là mã nguồn đang vận hành thực tế của người dùng:
-
-| File / Thư mục | Vai trò và chức năng chính |
+| Mục | Đường dẫn |
 |---|---|
-| `Main.ahk` | Entrypoint của macro. Khởi tạo môi trường, nạp cấu hình, hook hotkey và chứa **Dev Harness Hook (`--run <FunctionName>`)** cho phép chạy kiểm thử độc lập một hàm bất kỳ. |
-| `Lib\GameMango.ahk` | **Trái tim logic của macro** (~7000 dòng):<br>- Điều hướng vào từng chế độ game (`StoryMode`, `Infinite`, `RaidMode`, `LegendMode`, `InfinityCastleMode`, `DungeonMode`, `SummerEventMode`, v.v.).<br>- Logic đầu trận: căn camera (`PlacementCamera`), di chuyển theo từng map (`MoveFor<Map>`), bật vote wave (`StartedGame`).<br>- Logic đặt quân (`PlacingUnits`, `PlaceUnit`, `GenerateCirclePoints`).<br>- Logic nâng cấp (`UpgradeUnits`, `UpgradeUnit`, `MaxUpgrade`).<br>- Logic theo dõi trận & thẻ bài (`MonitorStage`, `WaitForCardChoice`, `ChooseCard`).<br>- Logic nhận diện kết thúc (`MonitorEndScreen`, `ResultScreenReady`, `ChooseResultRoute`). |
-| `Lib\Functions.ahk` | **Tầng tiện ích & dịch vụ hệ thống**:<br>- Quản lý cấu hình (`readInSettings`, `SaveSettings`).<br>- Input helpers (`FixClick`, `FixMove`).<br>- Xử lý Captcha (`CaptchaDetect`).<br>- Xử lý toggle cài đặt Roblox (`TpSpawn`, `FindUpgradeToggleRow`).<br>- Quản lý chat và leaderboard (`CloseChat`, `ClosePlayerLeaderBoard`). |
-| `Lib\GUI.ahk` | Giao diện đồ họa macro (AHK GUI): danh sách chọn chế độ, map, act, checkbox tính năng (`Matchmaking`, `Next Level`, `Return To Lobby`, `Auto Ability`), cấu hình slot 1-6 và hotkeys điều khiển. |
-| `Lib\Image.ahk` | Chứa toàn bộ chuỗi mã hóa ký tự và hình ảnh dùng cho `FindText` (nút bấm, chữ Victory, Defeat, thanh máu, biểu tượng chế độ). |
-| `Lib\webhooksettings.ahk` | Cấu hình và gửi webhook Discord. |
-| `Settings\Configuration.txt` | Lưu trạng thái cấu hình hiện tại của người dùng (Mode, Map, Enabled slots, Placement, Matchmaking, MaxLevel). |
+| PROD (code đang chạy) | `D:\Macro\AA mango` |
+| DEV (test/probe/backup) | `D:\Macro\AA-mango-dev` |
+| Tài liệu | `D:\Macro\AGENTS.md`, `context.md`, `ARCHITECTURE.md` |
+| AHK | `C:\Users\thoan\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe` |
 
-### 🟢 Phân vùng DEV (`D:\Macro\AA-mango-dev`) — Vùng thí nghiệm & Kiểm thử của Agent
-- Thư mục sandbox cho Agent thực hiện nghiên cứu, lập test script, chạy probe đo đạc tọa độ, kiểm tra OCR.
-- Agent có thể `#Include` trực tiếp thư viện từ PROD để kiểm thử mà không làm thay đổi file gốc.
+```powershell
+# Bắt buộc sau mọi lần sửa .ahk
+& $ahk /ErrorStdOut /Validate "D:\Macro\AA mango\Main.ahk"
 
----
+# Chạy đúng một hàm (không chạy cả trận)
+& $ahk "D:\Macro\AA mango\Main.ahk" --run <TenHam> "D:\Macro\AA-mango-dev\out.json" 60000
 
-## 4. Vòng đời hoạt động của Macro (Macro Execution Lifecycle)
-
-Một vòng lặp tự động hoàn chỉnh diễn ra theo 5 giai đoạn:
-
-```mermaid
-flowchart TD
-    A["Giai đoạn 1: Vào Mode (Lobby)"] --> B["Giai đoạn 2: Chuẩn bị trong trận (Setup)"]
-    B --> C["Giai đoạn 3: Đặt quân & Nâng cấp (Combat)"]
-    C --> D["Giai đoạn 4: Theo dõi trận & Chọn thẻ (Monitoring)"]
-    D --> E["Giai đoạn 5: Kết thúc & Điều hướng (Result Routing)"]
-    E -->|"Matchmaking = ON (Rule cứng) / Return To Lobby = 1 / Hết vé Raid"| A
-    E -->|"Matchmaking = OFF (Solo): Seamless Replay / Next Level"| B
+# Kiểm tra bất biến + validate
+powershell -ExecutionPolicy Bypass -File "D:\Macro\AA-mango-dev\check-invariants.ps1"
 ```
 
-### Chi tiết từng giai đoạn:
-1. **Giai đoạn 1: Vào Mode từ Lobby (`StartSelectedMode`)**:
-   - Nhân vật thực hiện lộ trình đi bộ (`<Mode>Movement`) đến khu vực chọn màn.
-   - Khi bảng chọn mở ra (`IsModeCancelOpen`), macro kiểm tra checkbox `Matchmaking`:
-     - Nếu **có tick**: Gọi `FindMatch()`, tự phát hiện bảng số Captcha, giải bằng `CaptchaDetect`, gõ số và bấm xác nhận để tìm phòng.
-     - Nếu **không tick**: Bấm `PlayHere()` để vào trận một mình (Solo).
-2. **Giai đoạn 2: Thiết lập đầu trận (`RestartStage` $\rightarrow$ `BasicSetup`)**:
-   - Chờ game load (`CheckLoaded`), tự động phát hiện nếu bị trả về sảnh (do hết vé Raid/key) để xử lý an toàn.
-   - Tắt Leaderboard, tắt Chat (`CloseChat`).
-   - Teleport về Spawn (`TpSpawn`), chỉnh góc nhìn camera phẳng (`PlacementCamera`).
-   - Đi bộ đến vị trí đường quái (`HandleMapMovement` theo từng Map).
-   - Tự động bỏ phiếu bắt đầu màn chơi (`StartedGame`).
-3. **Giai đoạn 3: Đặt quân & Nâng cấp (`PlacingUnits`)**:
-   - Chọn slot unit bằng phím số `1`–`6`.
-   - Quét tọa độ đặt quân (theo file cấu hình hoặc thuật toán hình tròn 64 điểm `GenerateCirclePoints`).
-   - Xác nhận đặt quân thành công qua thanh máu/panel (`UnitPlaced`).
-   - Mở panel unit và nâng cấp (`UpgradeUnits`) theo cấp độ mong muốn (`MaxLevel1-6`).
-4. **Giai đoạn 4: Theo dõi trận & Sự kiện (`MonitorStage`)**:
-   - Kiểm tra Anti-AFK định kỳ mỗi 5 phút.
-   - Quét màn hình chọn thẻ bài sự kiện (`WaitForCardChoice` / `ChooseCard`), tự động đọc buff bằng OCR và click chọn thẻ tối ưu.
-   - Tự động dùng kỹ năng nhân vật (`AutoAbilityBox`).
-5. **Giai đoạn 5: Kết thúc trận & Tái khởi động (`MonitorEndScreen`)**:
-   - Phát hiện màn hình XP / Thắng / Thua (`VictoryText` / `DefeatText`).
-   - Gửi Discord Webhook kèm thời gian hoàn thành.
-   - Bấm `Next` qua màn hình tổng kết (`summary`).
-   - **Quy tắc điều hướng cuối trận**:
-     - **Matchmaking = ON (Rule cứng)**: Bắt buộc bấm **Return to lobby** $\rightarrow$ Quay lại Giai đoạn 1 để giải tán phòng và ghép trận mới từ sảnh.
-     - **Matchmaking = OFF (Chơi Solo)**: Tận dụng cơ chế **Seamless Replay (BETA)** tái khởi động tại chỗ sau loading screen ngắn:
-       - Nếu tick **Return To Lobby** (`ReturnLobbyBox = 1`): Bấm `Return to lobby` $\rightarrow$ Quay lại Giai đoạn 1 để về sảnh.
-       - Nếu Story và tick **Next Level** (`NextLevelBox = 1`): Bấm `Next Level` (hoặc `Next Room`) $\rightarrow$ Khởi động in-place sang Act tiếp theo.
-       - Mặc định: Bấm **Replay** (hoặc `Retry` trong Infinity Mansion) $\rightarrow$ Tái khởi động ngay tại chỗ (Giai đoạn 2) mà không đổi server.
-     - **Summer Hunt**: Khi solo replay trên cùng map nếu trong giờ chưa đổi map; thời tiết mới cập nhật ngay lập tức.
-     - **Tự động thoát hiểm**: Người chơi hết vé Raid hoặc thiếu key/item sẽ bị game đưa về Lobby $\rightarrow$ Macro tự động nhận diện `AreaText` trong `CheckLoaded` và quay lại Giai đoạn 1 an toàn.
+`--run ok=true` chỉ có nghĩa là **không ném exception**, không phải thành công nghiệp vụ. Phải đọc log/ảnh.
 
 ---
 
-## 5. Các công cụ và quy ước quan trọng cho Agent
+## 2. Quyền tự chủ
 
-- **Dev Harness Runner**:
-  Có thể kiểm tra nhanh bất kỳ hàm nào trong `Main.ahk` mà không cần chạy cả trận bằng lệnh:
-  ```powershell
-  & "C:\Users\thoan\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe" "D:\Macro\AA mango\Main.ahk" --run <TênHàm> <FileKếtQuả.json> <TimeoutMs>
-  ```
-- **Lệnh Validate cú pháp**:
-  Bắt buộc chạy sau mỗi lần chỉnh sửa file AHK (exit code phải bằng 0):
-  ```powershell
-  & "C:\Users\thoan\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut /Validate "D:\Macro\AA mango\Main.ahk"
-  ```
-- **Tài liệu theo dõi trạng thái**:
-  - `AgentOnly.md`: Bản đồ nhãn trạng thái các hàm (`WORKING`, `SYSTEM`, `BUGGING`) — **do User sở hữu, Agent chỉ đọc**.
-  - `context.md`: Nhật ký lưu trữ bằng chứng sau mỗi lần thay đổi thành công — **Agent ghi thêm vào cuối file**.
-  - `.agents\rules\aa-mango-rules.md`: Bộ quy tắc bảo vệ mã nguồn và kỷ luật thao tác dành cho Agent.
+### Làm ngay, chỉ báo sau
+- Đọc, grep, chạy validate/test/probe, chụp ảnh, đo toạ độ.
+- Sửa bất cứ thứ gì trong `D:\Macro\AA-mango-dev`.
+- Sửa 1–2 hàm PROD, đúng yêu cầu, diff nhỏ (≤ ~30 dòng), không đổi kiến trúc.
+- Thêm/sửa log, comment, typo; cập nhật `context.md`.
+- `git add` + `git commit` trên nhánh làm việc.
+
+### Làm, nhưng báo rõ trong kết quả
+- Đổi hành vi người dùng thấy được — **khi yêu cầu đã nói rõ việc đó**.
+- Chạm vùng dễ vỡ (mục 5) — khi yêu cầu trực tiếp cần.
+- Đổi default/`Settings\Configuration.txt`.
+- Xoá/đổi tên hàm, file — chỉ khi yêu cầu nói rõ.
+- Sửa quá 2 file.
+
+### Phải hỏi trước
+- Hành động không thể đảo ngược ngoài phạm vi yêu cầu: xoá dữ liệu, reset config, `git push --force`, xoá backup.
+- Yêu cầu mâu thuẫn hoặc mơ hồ đến mức hai cách hiểu cho hành vi khác nhau rõ rệt.
+- Đụng API key/token/bí mật.
+
+---
+
+## 3. Khi nào được hỏi
+
+Chỉ hỏi khi rơi vào mục “Phải hỏi trước”. Còn lại:
+
+- Không hỏi “bạn có muốn tôi sửa không?” khi yêu cầu đã rõ.
+- Không hỏi lại thông tin đã có trong file này, `context.md` hoặc code.
+- Không xin xác nhận từng bước; làm trọn gói rồi báo.
+- Nếu có 2 cách tương đương: chọn cách nhỏ hơn, ghi giả định vào báo cáo.
+- Nếu tool/sandbox chặn lệnh: xin quyền cho đúng lệnh đó, không hỏi lại thiết kế.
+- Một câu hỏi gộp, tối đa 3 lựa chọn, kèm default bạn sẽ dùng nếu không ai trả lời.
+- Không hỏi “tiếp tục không?” sau khi đã hoàn thành.
+
+---
+
+## 4. Bất biến — không được phá
+
+- **CAPTCHA tự động**: `CaptchaDetect` phải tồn tại và được gọi ở `FindMatch` và luồng Summer.
+  CAPTCHA của game là **chống spam, không phải chống bot**; tự đọc và nhập là hành vi mong muốn.
+  Không thay bằng “chờ user nhập tay”. Không log nội dung CAPTCHA.
+- **Đủ mode**: `ModeDropdown` phải giữ đủ 10 mode:
+  `Infinite, Story, Portal, Daily Infinite Quest, Farm, Legend, Raid, Infinity Castle, Dungeon, Summer Event`.
+  `StartSelectedMode` phải dispatch đủ. Không hardcode Summer Event.
+  `Contract` đã được user bỏ có chủ đích (2026-11-04) — không tự thêm lại.
+- **Input Roblox**: giữ `SendMode "Event"`; mọi click qua `FixClick`; wheel qua `FixMove`.
+- **Chat**: chỉ đóng, không mở lại.
+- **Không xoá/đổi tên tính năng** để “dọn code”, “refactor”, hay vì lý do an toàn chung.
+- **Không log** API key, token, webhook URL, nội dung CAPTCHA.
+- **Không tạo file mới** trong cây PROD. File tạm để ở DEV.
+- **Điều hướng cuối trận**: Matchmaking bật → `Return to lobby`; tắt → Replay/Next Level theo cấu hình.
+- **Hình học**: client 800×599 chỉ là mốc lịch sử. Luôn đọc kích thước/DPI thật.
+
+---
+
+## 5. Vùng dễ vỡ (làm được, nhưng phải test kỹ và báo rõ)
+
+`FixClick`, `FixMove`, `CloseChat`, `IsChatOpen`, `TpSpawn`, `EnsureUpgradeUIOnLeft`,
+`FindUpgradeToggleRow`, `Zoom`, `PlacementCamera`, `StartedGame`,
+`DismissPromoPopups`, `CheckLobby`, `ClosePlayerLeaderBoard`, `Reconnect`, `TogglePause`,
+`ChooseResultRoute`, `TryResultAction`, `MonitorEndScreen`, `ClassifyResultScreen`.
+
+Đây **không phải** danh sách cấm. Đây là danh sách “sửa xong phải chứng minh”.
+
+---
+
+## 6. Kỷ luật thay đổi
+
+- Một thay đổi → validate → test → thay đổi tiếp theo.
+- Diff nhỏ nhất có thể. Không format lại, không đổi tên, không xoá comment ngoài phạm vi.
+- Không sửa 3 thứ cùng lúc.
+- Không đoán toạ độ/sleep: đo bằng ảnh hoặc log trước khi sửa.
+- Nếu test fail, câu hỏi đầu tiên là “test có hợp lệ không?” (panel settings còn mở, macro đang chạy, sai màn hình…).
+
+---
+
+## 7. Xong khi
+
+1. `/Validate Main.ahk` → `exit=0`, output rỗng.
+2. `check-invariants.ps1` → pass.
+3. Test liên quan trong `AA-mango-dev\Tests` → pass.
+4. Nếu đổi hành vi: có log/ảnh live, hoặc ghi rõ **“chưa test live”**.
+5. `context.md` thêm 3–6 dòng: ngày, `file:hàm`, đổi gì, bằng chứng, chưa xác nhận.
+6. Báo 4 dòng: `Kết quả | Bằng chứng | Chưa xác nhận | Rủi ro`.
+
+---
+
+## 8. Báo cáo
+
+Trả lời tiếng Việt, ngắn, không lan man:
+
+1. **Kết quả** — đã làm gì, file:hàm nào.
+2. **Bằng chứng** — validate exit + log/ảnh có timestamp.
+3. **Chưa xác nhận** — phần chưa test live, nói thẳng.
+4. **Rủi ro** — điều gì có thể hỏng ở lần chạy sau.
+
+Không nói “đã fix” nếu không có bằng chứng. Không dùng “có lẽ”, “chắc là”.
+
+---
+
+## 9. Tài liệu và git
+
+- `context.md`: append-only, ngắn. Không dán cả bài, không chép lại code.
+- `ARCHITECTURE.md`: kiến trúc + luồng 5 giai đoạn. Chỉ đọc khi cần.
+- `AgentOnly.md`: **đã bỏ** (archive ở `AA-mango-dev\archive\`). Không tạo lại bảng nhãn hàm.
+- Git: `main` là bản ổn định; làm việc trên `agent/<chu-de>`; commit nhỏ, message rõ.
+- Không commit `Settings/`, `Logs/`, `AA-mango-dev/Debug/`, `backup/`, file `.json/.png` sinh ra khi test.
+- Trước khi commit: `git status` + `git diff` phải đúng phạm vi. Không commit file lạ.
+- Không `git push --force` lên `main`. Không commit bí mật.
+
+Skill `aa-macro` chỉ chứa **quy trình/quan sát/validate**; luật nằm ở file này.

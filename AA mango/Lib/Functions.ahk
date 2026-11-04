@@ -556,7 +556,7 @@ CaptchaDetect(x, y, w, h, inputX, inputY, greenOnly := false) {
                         FixClick(inputX, inputY)
                         Sleep(300)
 
-                        ProcessLog("Sending number: " number)
+                        ProcessLog("Da nhap ma xac minh")
                         for digit in StrSplit(number) {
                             Send(digit)
                             Sleep(120)
