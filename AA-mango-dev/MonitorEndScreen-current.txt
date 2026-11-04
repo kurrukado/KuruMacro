@@ -1,0 +1,116 @@
+ChooseResultRoute(matchmaking) {
+    return matchmaking ? "lobby" : "replay"
+}
+
+ClassifyResultScreen(text) {
+    if RegExMatch(text, "i)choose\s+a\s+card|the\s+weather\s+shifts")
+        return ""
+    if (RegExMatch(text, "i)xp\s+progress") && RegExMatch(text, "i)total\s+time|waves\s+completed")
+        && RegExMatch(text, "i)\bnext\b"))
+        return "summary"
+    if (RegExMatch(text, "i)return\s+to\s+lobby") && RegExMatch(text, "i)\breplay\b|waiting\s+for\s+players"))
+        return "choices"
+    return ""
+}
+
+ReadResultScreen() {
+    global rblxID
+    if !WinActive(rblxID)
+        return 0
+    try {
+        WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+        if (cw != 800 || ch != 599)
+            return 0
+        return OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
+    }
+    return 0
+}
+
+TryResultAction(&action := "") {
+    global MatchMaking
+    action := ""
+    result := ReadResultScreen()
+    if !IsObject(result)
+        return false
+    phase := ClassifyResultScreen(result.Text)
+    if (phase = "")
+        return false
+    wanted := phase = "summary" ? "next" : ChooseResultRoute(MatchMaking.Value)
+    label := wanted = "next" ? "Next" : (wanted = "lobby" ? "Return to lobby" : "Replay")
+    try rect := result.FindString(label)
+    catch
+        return false
+    if !IsObject(rect)
+        return false
+    x := Round(rect.x + rect.w / 2), y := Round(rect.y + rect.h / 2)
+    ; Restrict to observed result-button bands, never a settings row or the arena.
+    if (wanted = "next") {
+        if (x < 240 || x > 420 || y < 350 || y > 450)
+            return false
+    } else if (x < 190 || x > 630 || y < 70 || y > 180) {
+        return false
+    }
+    fresh := ReadResultScreen()
+    if !IsObject(fresh) || ClassifyResultScreen(fresh.Text) != phase
+        return false
+    SummerClick(x, y)
+    action := wanted
+    ProcessLog("Result UI: " wanted " (matchmaking=" MatchMaking.Value ")")
+    Sleep(500)
+    return true
+}
+
+ContinueAfterResult(action) {
+    global mode, SummerAwaitingMatch, SummerMapName
+    deadline := A_TickCount + 45000
+    while (A_TickCount < deadline) {
+        result := ReadResultScreen()
+        if IsObject(result) && ClassifyResultScreen(result.Text) = "" {
+            if (action != "lobby" || RegExMatch(result.Text, "i)\bareas\b"))
+                break
+        }
+        Sleep(500)
+    }
+    if (A_TickCount >= deadline) {
+        ProcessLog("Result UI: chua xac nhan chuyen canh; dung, khong click lap")
+        return false
+    }
+    if (action = "lobby") {
+        SummerAwaitingMatch := false
+        SummerMapName := ""
+        return StartSelectedMode()
+    }
+    if (mode = "Summer Event") {
+        mapName := DetectSummerMap(60000) ; replay can rotate the actual map
+        if (mapName = "")
+            return false
+        SummerMapName := mapName
+        return RestartStage(mapName)
+    }
+    return RestartStage()
+}
+
+MonitorEndScreen() {
+    deadline := A_TickCount + 45000
+    while (A_TickCount < deadline) {
+        if TryResultAction(&action) {
+            if (action = "next")
+                continue
+            return ContinueAfterResult(action)
+        }
+        Sleep(500)
+    }
+    ProcessLog("Result UI: khong xac nhan duoc nut an toan; can xem lai UI")
+    return false
+}
+
+ResultActionProbe() {
+    global MatchMaking, rblxID
+    WinActivate(rblxID)
+    WinWaitActive(rblxID,, 2)
+    MatchMaking.Value := 1
+    if !TryResultAction(&action)
+        throw Error("Result probe: chua xac nhan duoc nut ket qua")
+    if (action != "lobby")
+        throw Error("Result probe: expected lobby choice")
+}

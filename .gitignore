@@ -1,0 +1,35 @@
+# --- Secrets / runtime state (never commit) ---
+AA mango/Settings/
+AA-mango-dev/Settings/
+*.key
+*.token
+
+# --- Logs ---
+AA mango/Logs/
+*.log
+
+# --- Dev artifacts ---
+AA-mango-dev/Debug/
+AA-mango-dev/backup/
+AA-mango-dev/SumnmerCards/
+AA-mango-dev/*.json
+AA-mango-dev/*.png
+AA-mango-dev/latest.json
+AA-mango-dev/.temp_observation.log
+
+# --- One-off snapshot folders (kept on disk, not in git) ---
+AA-mango-dev/basic-settings-ui/
+AA-mango-dev/gemini-rollback/
+AA-mango-dev/jev-once-per-offer/
+AA-mango-dev/match-leaderboard/
+AA-mango-dev/prod-combined-*/
+AA-mango-dev/summer-captcha/
+AA-mango-dev/summer-captcha-f2/
+AA-mango-dev/summer-captcha-ui/
+AA-mango-dev/unit-upgrade-ui/
+AA-mango-dev/upgrade-no-hotbar/
+
+# --- OS / editor ---
+Thumbs.db
+desktop.ini
+.vscode/
