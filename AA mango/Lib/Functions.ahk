@@ -1,4 +1,4 @@
-#Warn VarUnset, Off
+﻿#Warn VarUnset, Off
 #Warn All, Off
 
 if (A_ScriptFullPath = A_LineFile) {
@@ -24,18 +24,32 @@ setupFilePath() {
 }
 
 ChooseDropdownItemByText(dropDown, text) {
-    if !IsSet(dropDown) || !IsObject(dropDown)
+    if !IsObject(dropDown)
         return false
+    text := Trim(text, " `t`r`n")
     try {
-        items := dropDown.GetCount()
-        loop items {
-            if (dropDown.GetText(A_Index) = text) {
-                dropDown.Choose(A_Index)
-                return true
-            }
-        }
+        dropDown.Choose(text)
+        return dropDown.Text = text
     }
     return false
+}
+
+NormalizeUnitType(value) {
+    switch StrLower(Trim(value, " `t`r`n")) {
+        case "farm": return "Farm"
+        case "ground": return "Ground"
+        case "hill": return "Hill"
+        case "hybrid": return "Hybrid"
+    }
+    throw ValueError("Type: select Farm, Ground, Hill or Hybrid")
+}
+
+GetUnitPlacementType(slot) {
+    global UnitData
+    if (slot < 1 || slot > UnitData.Length)
+        return "Ground"
+    try return NormalizeUnitType(UnitData[slot].Type.Text)
+    return "Ground"
 }
 
 NormalizeUnitMaxLevel(value) {
@@ -45,7 +59,7 @@ NormalizeUnitMaxLevel(value) {
         return "OFF"
     if RegExMatch(value, "^(?:[1-9]|1\d|20)$")
         return Integer(value) ""
-    throw ValueError("Max Level: chon OFF hoac muc tu 1 den 20")
+    throw ValueError("Max Level: select OFF or a level from 1 to 20")
 }
 
 GetUnitUpgradeLimit(slot) {
@@ -60,7 +74,7 @@ readInSettings() {
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
     global placement1, placement2, placement3, placement4, placement5, placement6
     global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox
+    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, ReplayBox
 
     try {
         settingsFile := setupFilePath()
@@ -78,6 +92,14 @@ readInSettings() {
             }
 
             parts := StrSplit(line, "=")
+            if RegExMatch(parts[1], "^UnitType([1-6])$", &typeSlot) {
+                try UnitData[Integer(typeSlot[1])].Type.Choose(NormalizeUnitType(parts[2]))
+                catch {
+                    UnitData[Integer(typeSlot[1])].Type.Choose("Ground")
+                    ProcessLog("Unit " typeSlot[1] ": invalid saved type; using Ground")
+                }
+                continue
+            }
             if RegExMatch(parts[1], "^MaxLevel([1-6])$", &maxSlot) {
                 try UnitData[Integer(maxSlot[1])].MaxLevel.Text := NormalizeUnitMaxLevel(parts[2])
                 continue
@@ -86,10 +108,16 @@ readInSettings() {
                 case "Mode":
                     mode := parts[2]
                     try ChooseDropdownItemByText(ModeDropdown, mode)
+                case "PlacementPattern":
+                    try ChooseDropdownItemByText(PlacementPatternDropdown, Trim(parts[2], " `t`r`n"))
                 case "Matchmaking":
                     try MatchMaking.Value := Trim(parts[2], " `t`r`n") = "1"
                 case "ReturnToLobby":
                     try ReturnLobbyBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                case "NextLevel":
+                    try NextLevelBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                case "Replay":
+                    try ReplayBox.Value := Trim(parts[2], " `t`r`n") = "1"
                 case "Map":
                     try ChooseDropdownItemByText(MapDropdown, parts[2])
                 case "Enabled1": try enabled1.Value := parts[2]
@@ -126,9 +154,18 @@ SaveSettings(*) {
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
     global placement1, placement2, placement3, placement4, placement5, placement6
     global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox
+    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, ReplayBox
 
     ; Validate all six values before replacing the existing configuration.
+    unitTypes := []
+    for slot, unit in UnitData {
+        try unitTypes.Push(NormalizeUnitType(unit.Type.Text))
+        catch as err {
+            ProcessLog("Unit " slot ": " err.Message)
+            unit.Type.Focus()
+            return false
+        }
+    }
     maxLevels := []
     for slot, unit in UnitData {
         try maxLevels.Push(NormalizeUnitMaxLevel(unit.MaxLevel.Text))
@@ -160,6 +197,8 @@ SaveSettings(*) {
             content .= "Map=Planet Greenie"
         }
 
+        content .= "`nPlacementPattern=" PlacementPatternDropdown.Text
+
         ; Save settings for each unit
         content .= "`n`nEnabled1=" (IsSet(enabled1) ? enabled1.Value : 1)
         content .= "`nEnabled2=" (IsSet(enabled2) ? enabled2.Value : 1)
@@ -177,6 +216,8 @@ SaveSettings(*) {
 
         content .= "`nMatchmaking=" (IsSet(MatchMaking) ? MatchMaking.Value : 0)
         content .= "`nReturnToLobby=" (IsSet(ReturnLobbyBox) ? ReturnLobbyBox.Value : 0)
+        content .= "`nNextLevel=" (IsSet(NextLevelBox) ? NextLevelBox.Value : 1)
+        content .= "`nReplay=" (IsSet(ReplayBox) ? ReplayBox.Value : 1)
         content .= "`nPriority1=" (IsSet(priority1) ? priority1.Text : "1")
         content .= "`nPriority2=" (IsSet(priority2) ? priority2.Text : "2")
         content .= "`nPriority3=" (IsSet(priority3) ? priority3.Text : "3")
@@ -194,6 +235,9 @@ SaveSettings(*) {
             UnitData[index].MaxLevel.Text := value
             content .= "`nMaxLevel" index "=" value
         }
+
+        for index, value in unitTypes
+            content .= "`nUnitType" index "=" value
 
         FileAppend(content, settingsFile)
         ProcessLog("Configuration setting are saved")
@@ -347,6 +391,7 @@ OnModeChange(*) {
         ReturnLobbyBox.Visible := true
     } else if (selected = "Summer Event") {
         mode := "Summer Event"
+        try StartPaddleWorker()
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
 
@@ -356,6 +401,7 @@ OnModeChange(*) {
         MatchMaking.Visible := true
         mode := "Infinite"
     }
+    UpdateResultOptionsForMode(selected)
 }
 
 OnStoryChange(*) {
@@ -388,7 +434,7 @@ OnConfirmClick(*) {
 
 ConfirmModeSelection(hideSelection := true) {
     if (ModeDropdown.Text = "") {
-        ProcessLog("Chọn chế độ trước khi xác nhận chứ Nigga")
+        ProcessLog("Select a mode before confirming")
         return
     }
 
@@ -423,7 +469,7 @@ ConfirmModeSelection(hideSelection := true) {
     }
     ;For Farm Mode
     else if (ModeDropdown.Text = "Farm") {
-        ProcessLog("Đã chọn chế độ: " ModeDropdown.Text)
+        ProcessLog("Selected mode: " ModeDropdown.Text)
         MatchMaking.Visible := false
         MatchMaking.Value := 0
     }
@@ -464,7 +510,8 @@ ConfirmModeSelection(hideSelection := true) {
         ReturnLobbyBox.Visible := true
     }
     else if (ModeDropdown.Text = "Summer Event") {
-        ProcessLog("Selected Summer Event - matchmaking (manual verification if requested)")
+        try StartPaddleWorker()
+        ProcessLog("Selected Summer Event - result actions follow the GUI options; matchmaking returns to lobby")
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
     }
@@ -485,12 +532,13 @@ ConfirmModeSelection(hideSelection := true) {
         MatchMaking.Visible := true
     }
     else {
-        ProcessLog("Đã chọn chế độ: " ModeDropdown.Text)
+        ProcessLog("Selected mode: " ModeDropdown.Text)
         MatchMaking.Visible := false
         MatchMaking.Value := 0
         ReturnLobbyBox.Visible := false
     }
 
+    UpdateResultOptionsForMode(ModeDropdown.Text)
     ; Hide all controls if validation passes. Startup restores the saved mode and
     ; calls this with hideSelection=false so the mode selector stays usable;
     ; only a real Confirm click collapses the selector.
@@ -511,6 +559,16 @@ ConfirmModeSelection(hideSelection := true) {
         Hotkeytext2.Visible := true
     }
     global confirmClicked := true
+}
+
+UpdateResultOptionsForMode(selectedMode) {
+    global NextLevelBox, ReplayBox, ReturnLobbyBox, MatchMaking
+    NextLevelBox.Visible:=true
+    ReplayBox.Visible:=true
+    ReturnLobbyBox.Visible:=true
+    repeatEnabled:=!MatchMaking.Value && !ReturnLobbyBox.Value
+    NextLevelBox.Enabled:=repeatEnabled
+    ReplayBox.Enabled:=repeatEnabled
 }
 
 FixClick(x, y, LR := "Left") {
@@ -556,7 +614,7 @@ CaptchaDetect(x, y, w, h, inputX, inputY, greenOnly := false) {
                         FixClick(inputX, inputY)
                         Sleep(300)
 
-                        ProcessLog("Da nhap ma xac minh")
+                        ProcessLog("Verification code entered")
                         for digit in StrSplit(number) {
                             Send(digit)
                             Sleep(120)
@@ -575,19 +633,7 @@ CaptchaDetect(x, y, w, h, inputX, inputY, greenOnly := false) {
 
 
 TogglePriorityDropdowns(*) {
-    global PriorityUpgrade, priority1, priority2, priority3, priority4, priority5, priority6
-    shouldShow := PriorityUpgrade.Value
-
-    priority1.Visible := shouldShow
-    priority2.Visible := shouldShow
-    priority3.Visible := shouldShow
-    priority4.Visible := shouldShow
-    priority5.Visible := shouldShow
-    priority6.Visible := shouldShow
-
-    for unit in UnitData {
-        unit.PriorityText.Visible := shouldShow
-    }
+    LayoutUnitColumns()
 }
 
 SaveKeybindSettings(*) {

@@ -1,0 +1,22 @@
+# Local user data. Blank templates travel with a fresh clone.
+/Settings/*
+!/Settings/*.example.txt
+!/Settings/*.example.md
+/Logs/
+/.vscode/
+*.log
+*.key
+*.token
+.env
+.env.*
+
+# Installed Python and generated OCR caches. Ship the two models worker.py uses.
+/Tools/PaddleCards/python/
+/Tools/PaddleCards/.venv/
+__pycache__/
+*.py[cod]
+/Tools/PaddleCards/models/*
+!/Tools/PaddleCards/models/official_models/
+/Tools/PaddleCards/models/official_models/*
+!/Tools/PaddleCards/models/official_models/PP-OCRv5_mobile_det/
+!/Tools/PaddleCards/models/official_models/en_PP-OCRv5_mobile_rec/
