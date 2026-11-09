@@ -9,33 +9,27 @@
 
 ## 🎮 Supported Games
 
-| Game | Status |
-| :--- | :---: |
-| **Anime Adventures** | Active / Ongoing |
-| **Anime Rangers** | Discontinued |
-| **Anime Vanguards** | Outdated |
-| **Anime Universal Tower Defense** | Discontinued |
+| Game | Status | Detail |
+| :--- | :---: | ---: |
+| **Anime Adventures** | Active / Ongoing | Up-to-date with the game |
+| **Anime Rangers** | Discontinue | Out-dated before the second reset |
+| **Anime Vanguards** | Outdated | Out-dated from 2025 with only Infinite mode |
+| **Anime Universal Tower Defense** | Discontinue | Out-dated from late 2025 due to the game not received an update |
 
 ---
 
 ## 📥 Download
 
-Each game lives in its own folder (`AA mango/`, `AR mango/`, `AV mango/`, `UTD mango/`).
-Open a folder to browse or read the `.ahk` source directly on GitHub.
+Download Auto Hotkey V2 from official website, then install on your computer
+You can clone this repo or download (.zip) separate game's macro
+After download, open the folder has the macro you choose, click on `Main.ahk` to launch
 
-To grab everything as a single archive, use the green **Code → Download ZIP** button.
-`Settings/` ships as blank `*.example.txt` templates — no webhook, API key,
-Discord ID or private server. The macro writes the real files on first run.
+---
+## Notes
 
-Only these paths exist in this repository:
-
-```
-AA mango/  AR mango/  AV mango/  UTD mango/  README.md
-```
-
-`Settings/` contains only blank templates. `Logs/`, the test harness and the
-publishing tooling stay local, so `Code → Download ZIP` gives just the four
-macro folders, their `Settings/*.example.txt` files and this README.
+Everything are very simple so try figure it out!
+If you wonder what is JEV means, i used JEV AI to this Anime Adventure Macro, this feature makes it focus on good card to increase winning chance
+Get a free key from typesafe
 
 ---
 
@@ -43,3 +37,4 @@ macro folders, their `Settings/*.example.txt` files and this README.
 - **Core Engine:** Powered by **AutoHotkey v2 (AHK v2)**.
 - **Interface:** Includes a clean, user-friendly **Custom GUI**.
 - **Transparency:** 100% functional and **open-source**.
+- **From Dev:** it maybe buggy but i'll ship the bug fix asap along with new feature

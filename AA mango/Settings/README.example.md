@@ -16,14 +16,12 @@ File thật do macro tự tạo trong cùng thư mục này khi bạn bấm **Sa
 | `DiscordUSERID.example.txt` | `DiscordUSERID.txt` | ID Discord để tag (để trống) |
 | `PrivateServer.example.txt` | `PrivateServer.txt` | Link private server (để trống) |
 | `JevKey.example.txt` | `JevKey.txt` | API key Jev (để trống) |
-| `BannerUnit.example.txt` | `BannerUnit.txt` | Tên unit banner (để trống) |
 | `Cards.example.txt` | `Cards.txt` | Thuộc tính thẻ bài |
 | `UnitCoordinates.example.txt` | `<Map>_<Mode>.txt` | Toạ độ đặt 6 unit |
 
 ## Cách dùng
 
-Chỉ cần chạy macro và nhập thông tin trong GUI — file thật sẽ tự sinh.
-Chỉ copy `*.example.txt` thành file thật khi bạn muốn đặt sẵn giá trị mặc định.
+Trong GUI, nhập API key ở **JEV → Save key**, webhook và Discord ID ở **Discord → Save**. Để cấu hình bằng file, sao chép mẫu tương ứng rồi điền vào bản sao. Ví dụ từ thư mục `AA mango`, chạy `Copy-Item Settings\JevKey.example.txt Settings\JevKey.txt` khi chưa có `JevKey.txt`. Giữ bốn mẫu JevKey, WebhookURL, DiscordUSERID và PrivateServer trống hoàn toàn trong Git.
 
 Đừng commit file thật: `pre-commit` sẽ chặn mọi file trong `Settings/`
 trừ `*.example.txt` và `README.example.md`.

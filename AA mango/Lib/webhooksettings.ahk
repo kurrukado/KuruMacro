@@ -324,6 +324,8 @@ TextWebhook() {
 }
 
 InitiateWinWebhook() {
+    if (!FileExist(WebhookURLFile) || !FileExist(DiscordUserIDFile))
+        return ; standalone DEV has no copied credentials
     global WebhookURL := FileRead(WebhookURLFile, "UTF-8")
     global DiscordUserID := FileRead(DiscordUserIDFile, "UTF-8")
 
@@ -335,6 +337,8 @@ InitiateWinWebhook() {
 }
 
 InitiateLoseWebhook() {
+    if (!FileExist(WebhookURLFile) || !FileExist(DiscordUserIDFile))
+        return ; standalone DEV has no copied credentials
     global WebhookURL := FileRead(WebhookURLFile, "UTF-8")
     global DiscordUserID := FileRead(DiscordUserIDFile, "UTF-8")
 
@@ -346,6 +350,8 @@ InitiateLoseWebhook() {
 }
 
 WebhookLog() {
+    if (!FileExist(WebhookURLFile) || !FileExist(DiscordUserIDFile))
+        return ; standalone DEV has no copied credentials
     global WebhookURL := FileRead(WebhookURLFile, "UTF-8")
     global DiscordUserID := FileRead(DiscordUserIDFile, "UTF-8")
 
@@ -356,6 +362,8 @@ WebhookLog() {
 }
 
 BannerFound() {
+    if (!FileExist(WebhookURLFile) || !FileExist(DiscordUserIDFile))
+        return ; standalone DEV has no copied credentials
     global WebhookURL := FileRead(WebhookURLFile, "UTF-8")
     global DiscordUserID := FileRead(DiscordUserIDFile, "UTF-8")
 
@@ -373,6 +381,8 @@ SaveWebhookBtnClick() {
 ;Discord webhooks, above
 
 WebhookScreenshot(title, description, color := 0x0dffff, status := "") {
+    if (!FileExist(WebhookURLFile) || !FileExist(DiscordUserIDFile))
+        return ; do not instantiate a webhook without DEV configuration
     global webhook, WebhookURL, DiscordUserID, wins, loss, currentStreak, stageStartTime
     ; Yap message
 
