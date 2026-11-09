@@ -9,7 +9,7 @@
 
 ## 🎮 Supported Games
 
-| Game | Status | Detail
+| Game | Status | Detail |
 | :--- | :---: | ---: |
 | **Anime Adventures** | Active / Ongoing | Up-to-date with the game |
 | **Anime Rangers** | Discontinue | Out-dated before the second reset |
