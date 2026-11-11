@@ -11,7 +11,7 @@ if (A_ScriptFullPath = A_LineFile) {
 
 ; Basic Application Info
 global aaTitle := "KuruMacro Anime Adventures "
-global version := "v4.0"
+global version := "v4.1"
 global rblxID := "ahk_exe RobloxPlayerBeta.exe"
 ;Coordinate and Positioning Variables
 global targetWidth := 816
@@ -223,6 +223,7 @@ placementSaveBtn.OnEvent("Click", SaveSettings)
 
 aaMainUI.SetFont("Bold s9")
 global NextLevelBox := aaMainUI.Add("Checkbox", "x1225 y485 w125 h22 c0xb5b3b3 Checked", "Next Level")
+global NextRoomBox := aaMainUI.Add("Checkbox", "x1225 y485 w125 h22 c0xb5b3b3 Checked Hidden", "Next Room")
 global ReplayBox := aaMainUI.Add("Checkbox", "x980 y485 w100 h22 c0xb5b3b3 Checked", "Replay")
 ; Start in solo Play Here mode to avoid unattended matchmaking CAPTCHA prompts.
 global MatchMaking := aaMainUI.Add("Checkbox", "x1090 y485 w130 h22 c0xb5b3b3", "Matchmaking")
@@ -241,7 +242,7 @@ Hotkeytext2 := aaMainUI.Add("Text", "x807 y50 w530 h30", "F1: Chỉnh lại cử
 ;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT
 global modeSelectionGroup := aaMainUI.Add("GroupBox", "x808 y38 w500 h45 Background" uiTheme[2], "Chọn chế độ")
 aaMainUI.SetFont("Bold s10 c" uiTheme[6])
-global ModeDropdown := aaMainUI.Add("DropDownList", "x818 y53 w140 h220 Choose1 +Center", ["Infinite", "Story", "Portal", "Daily Infinite Quest", "Farm", "Legend", "Raid", "Infinity Castle", "Dungeon", "Summer Event"])
+global ModeDropdown := aaMainUI.Add("DropDownList", "x818 y53 w140 h240 Choose1 +Center", ["Infinite", "Story", "Portal", "Daily Infinite Quest", "Farm", "Legend", "Raid", "Infinity Castle", "Dungeon", "Summer Event", "Infinity Mansion"])
 global MapDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose1 +Center", ["Planet Greenie", "Walled City", "Snowy Town", "Sand Village", "Navy Bay", "Fiend City", "Spirit World", "Ant Kingdom", "Magic Town", "Haunted Academy", "Magic Hills", "Space Center", "Alien Spaceship", "Fabled Kingdom", "Ruined City", "Puppet Island", "Virtual Dungeon", "Snowy Kingdom", "Dungeon Throne", "Mountain Temple", "Rain Village", "Shibuya District", "Ninja Forest", "Marine Base", "Hollowed Moon"])
 global StoryDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose0 +Center", ["Planet Greenie", "Walled City", "Snowy Town", "Sand Village", "Navy Bay", "Fiend City", "Spirit World", "Ant Kingdom", "Magic Town", "Haunted Academy", "Magic Hills", "Space Center", "Alien Spaceship", "Fabled Kingdom", "Ruined City", "Puppet Island", "Virtual Dungeon", "Snowy Kingdom", "Dungeon Throne", "Mountain Temple", "Rain Village", "Shibuya District"])
 global StoryActDropdown := aaMainUI.Add("DropDownList", "x1128 y53 w80 h180 Choose0 +Center", ["Act 1", "Act 2", "Act 3", "Act 4", "Act 5", "Act 6", "Infinity"])
@@ -539,6 +540,7 @@ ApplyCompactLayout() {
     ReplayBox.Move(970, 397, 80)
     MatchMaking.Move(1055, 397, 120)
     NextLevelBox.Move(1175, 397, 100)
+    NextRoomBox.Move(1175, 397, 100)
     placementSaveText.Visible := false
     placementSaveBtn.Move(818, 353, 80, 28)
     AutoAbilityBox.Move(910, 357, 110)

@@ -1,7 +1,11 @@
-; Shared OCR primitive used by CAPTCHA, unit panels and cards.
-; Extracted without changing its implementation.
+﻿; Shared OCR primitive used by CAPTCHA, unit panels and cards.
+; Existing text API keeps its defaults; result API also supports neutral-white UI ink.
 
 ReadHighContrastText(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false) {
+    return ReadHighContrastResult(x,y,w,h,scale,sourceDC,greenOnly).Text
+}
+
+ReadHighContrastResult(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false, whiteOnly := false) {
     if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || scale <= 0 || scale > 6)
         throw ValueError("Invalid OCR rectangle")
     screenDC := 0, memoryDC := 0, bitmap := 0, previous := 0
@@ -30,6 +34,10 @@ ReadHighContrastText(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false) 
             offset := (A_Index - 1) * 4
             pixel := NumGet(bits, offset, "UInt")
             bright := Max(pixel & 255, (pixel >> 8) & 255, (pixel >> 16) & 255) >= 130
+            if whiteOnly {
+                light := Min(pixel & 255, (pixel >> 8) & 255, (pixel >> 16) & 255)
+                bright := light >= 150 && Max(pixel & 255, (pixel >> 8) & 255, (pixel >> 16) & 255)-light <= 80
+            }
             if greenOnly {
                 green := (pixel >> 8) & 255
                 red := (pixel >> 16) & 255
@@ -41,7 +49,7 @@ ReadHighContrastText(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false) 
         ; Deselect before OCR creates its own DC around the HBITMAP.
         DllCall("gdi32\SelectObject", "Ptr", memoryDC, "Ptr", previous)
         previous := 0
-        return OCR.FromBitmap(bitmap, "en-US", scale).Text
+        return OCR.FromBitmap(bitmap, "en-US", scale)
     } finally {
         if (previous && previous != -1 && memoryDC)
             DllCall("gdi32\SelectObject", "Ptr", memoryDC, "Ptr", previous)
