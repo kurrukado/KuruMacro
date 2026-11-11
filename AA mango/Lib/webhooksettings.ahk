@@ -10,7 +10,8 @@ global currentStreak := 0
 global lastResult := "none"
 global Wins := 0
 global loss := 0
-global mode := ""
+; GUI owns the selected mode; loading webhook support must not reset it.
+global mode := IsSet(mode) ? mode : ""
 global StartTime := A_TickCount 
 global stageStartTime := A_TickCount
 global macroStartTime := A_TickCount
@@ -145,7 +146,7 @@ UpdateStreak(isWin) {
 }
 
 SendWebhookWithTime(isWin, stageLength) {
-    global currentStreak, Wins, loss, WebhookURL, webhook, macroStartTime
+    global currentStreak, Wins, loss, WebhookURL, webhook, macroStartTime, mode, ModeDropdown
     
     ; Update streak
     UpdateStreak(isWin)
@@ -172,6 +173,7 @@ SendWebhookWithTime(isWin, stageLength) {
     ; Build session data
     sessionData := "⌛ Macro Runtime: " macroLength "`n"
     . "⏱️ Stage Length: " stageLength "`n"
+    . "🎮 Mode: " (mode != "" ? mode : ModeDropdown.Text) "`n"
     . "🔄 Current Streak: " (currentStreak > 0 ? currentStreak " Win Streak" : Abs(currentStreak) " Loss Streak") "`n"
     . ":white_check_mark: Successful Runs: " Wins "`n"
     . "❌ Failed Runs: " loss "`n"

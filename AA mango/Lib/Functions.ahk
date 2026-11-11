@@ -1,4 +1,4 @@
-﻿#Warn VarUnset, Off
+#Warn VarUnset, Off
 #Warn All, Off
 
 if (A_ScriptFullPath = A_LineFile) {
@@ -74,7 +74,7 @@ readInSettings() {
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
     global placement1, placement2, placement3, placement4, placement5, placement6
     global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, ReplayBox
+    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, NextRoomBox, ReplayBox
 
     try {
         settingsFile := setupFilePath()
@@ -116,6 +116,8 @@ readInSettings() {
                     try ReturnLobbyBox.Value := Trim(parts[2], " `t`r`n") = "1"
                 case "NextLevel":
                     try NextLevelBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                case "NextRoom":
+                    try NextRoomBox.Value := Trim(parts[2], " `t`r`n") = "1"
                 case "Replay":
                     try ReplayBox.Value := Trim(parts[2], " `t`r`n") = "1"
                 case "Map":
@@ -154,7 +156,7 @@ SaveSettings(*) {
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
     global placement1, placement2, placement3, placement4, placement5, placement6
     global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, ReplayBox
+    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, NextRoomBox, ReplayBox
 
     ; Validate all six values before replacing the existing configuration.
     unitTypes := []
@@ -217,6 +219,7 @@ SaveSettings(*) {
         content .= "`nMatchmaking=" (IsSet(MatchMaking) ? MatchMaking.Value : 0)
         content .= "`nReturnToLobby=" (IsSet(ReturnLobbyBox) ? ReturnLobbyBox.Value : 0)
         content .= "`nNextLevel=" (IsSet(NextLevelBox) ? NextLevelBox.Value : 1)
+        content .= "`nNextRoom=" (IsSet(NextRoomBox) ? NextRoomBox.Value : 1)
         content .= "`nReplay=" (IsSet(ReplayBox) ? ReplayBox.Value : 1)
         content .= "`nPriority1=" (IsSet(priority1) ? priority1.Text : "1")
         content .= "`nPriority2=" (IsSet(priority2) ? priority2.Text : "2")
@@ -380,6 +383,10 @@ OnModeChange(*) {
         mode := "Raid"
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
+    } else if (selected = "Infinity Mansion") {
+        mode := "Infinity Mansion"
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
     } else if (selected = "Infinity Castle") {
         InfinityCastleDropdown.Visible := true
         mode := "Infinity Castle"
@@ -509,6 +516,12 @@ ConfirmModeSelection(hideSelection := true) {
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
     }
+    else if (ModeDropdown.Text = "Infinity Mansion") {
+        ProcessLog("Selected Infinity Mansion - random map, Play Here")
+        MatchMaking.Value := 0
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    }
     else if (ModeDropdown.Text = "Summer Event") {
         try StartPaddleWorker()
         ProcessLog("Selected Summer Event - result actions follow the GUI options; matchmaking returns to lobby")
@@ -562,12 +575,18 @@ ConfirmModeSelection(hideSelection := true) {
 }
 
 UpdateResultOptionsForMode(selectedMode) {
-    global NextLevelBox, ReplayBox, ReturnLobbyBox, MatchMaking
-    NextLevelBox.Visible:=true
+    global NextLevelBox, NextRoomBox, ReplayBox, ReturnLobbyBox, MatchMaking
+    mansion := selectedMode = "Infinity Mansion"
+    MatchMaking.Enabled := !mansion
+    if mansion
+        MatchMaking.Value := 0
+    NextLevelBox.Visible:=!mansion
+    NextRoomBox.Visible:=mansion
     ReplayBox.Visible:=true
     ReturnLobbyBox.Visible:=true
     repeatEnabled:=!MatchMaking.Value && !ReturnLobbyBox.Value
-    NextLevelBox.Enabled:=repeatEnabled
+    NextLevelBox.Enabled:=repeatEnabled && !mansion
+    NextRoomBox.Enabled:=repeatEnabled && mansion
     ReplayBox.Enabled:=repeatEnabled
 }
 
@@ -688,7 +707,9 @@ global ImgSession := { GuiObj: "", Dots: [], UnitIndex: 0, MaxCount: 20, LastCli
 
 GetCurrentMapName() {
     global MapDropdown, StoryDropdown, LegendDropDown, RaidDropdown, PortalDropdown, ModeDropdown
-    global SummerMapName
+    global SummerMapName, MansionMapName
+    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Infinity Mansion")
+        return IsSet(MansionMapName) ? MansionMapName : ""
     if (IsSet(ModeDropdown) && ModeDropdown.Text = "Summer Event")
         return IsSet(SummerMapName) ? SummerMapName : ""
     if (IsSet(MapDropdown) && MapDropdown.Visible && MapDropdown.Text != "")
@@ -744,13 +765,16 @@ LoadImage(unitIndex) {
         return
     }
 
-    picPath := A_ScriptDir "\Images\" currentMap ".png"
+    picPath := A_ScriptDir "\GameModeImages\Placement\" currentMap ".png"
+
+    if !FileExist(picPath) && FileExist(A_ScriptDir "\Images\" currentMap ".png")
+        picPath := A_ScriptDir "\Images\" currentMap ".png"
 
     if !FileExist(picPath) {
         choice := MsgBox("Không tìm thấy file ảnh map tại:`n" picPath "`n`nBạn có muốn tự chọn file ảnh map từ máy tính không?",
             "Chưa có ảnh map", "YesNo Icon?")
         if (choice = "Yes") {
-            selectedFile := FileSelect(1, A_ScriptDir "\Images", "Chọn ảnh map cho '" currentMap "'",
+            selectedFile := FileSelect(1, A_ScriptDir "\GameModeImages\Placement", "Chọn ảnh map cho '" currentMap "'",
                 "Images (*.png; *.jpg; *.bmp)")
             if (selectedFile != "") {
                 picPath := selectedFile

@@ -1,4 +1,4 @@
-﻿; Shared Smart preview, Summer vote and lobby helpers.
+; Experimental code is local to DEV. No PROD files or settings are written.
 global SmartPlacementColor := -1
 global SummerMinimumPlayers := 4
 try SmartPlacementColor := Integer(IniRead(A_ScriptDir "\Settings\SmartPlacement.ini", "Preview", "Color", "-1"))
@@ -92,6 +92,25 @@ SmartCapturePreviewReference(x,y,slot:=0) {
     return SmartReadPreviewSample(x,y,&details,true)="baseline"
 }
 
+SmartReadTerrainPixels(screenX,screenY,dx,dy,greenPalette,redPalette,&details) {
+    oldPixelMode:=A_CoordModePixel
+    CoordMode "Pixel","Screen"
+    try {
+        for offset in [[-dx,-dy],[dx,-dy],[0,0],[-dx,dy],[dx,dy]] {
+            color:=PixelGetColor(screenX+offset[1],screenY+offset[2])
+            g:=(color>>8)&255
+            if SmartPreviewColorMatches(color,greenPalette)
+                && g>=((color>>16)&255)+30 && g>=(color&255)+20
+                details.fadedGreen++
+            if SmartPreviewColorMatches(color,redPalette)
+                details.red++
+        }
+    } finally {
+        CoordMode "Pixel",oldPixelMode
+    }
+    details.green:=Max(details.green,details.fadedGreen)
+}
+
 SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
     global rblxID,SmartPreviewReference,SmartPreviewUnitType
     hill:=IsSet(SmartPreviewUnitType) && SmartPreviewUnitType="Hill"
@@ -100,7 +119,7 @@ SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
     static fadedGreenPalette:=[[0x05F469,60],[0x00FF00,45],[0x66F800,60],[0x00C200,35]]
     ; Local blue unit-footprint outline supplements the existing green terrain
     ; checks. The outer range circle alone lies outside this bounded patch.
-    static normalBluePalette:=[[0x35E5FF,45]],hillBluePalette:=[[0x35E5FF,60]]
+    static normalBluePalette:=[[0x35E5FF,70]],hillBluePalette:=[[0x35E5FF,80]]
     cyanPalette:=hill ? hillBluePalette : normalBluePalette
     static redPalette:=[[0xE83C78,35],[0xFF0000,35],[0xFF0055,35],[0xFF6C5E,25],[0xFF5003,30],[0xC20000,30]]
     details:={reason:"focus-lost",green:0,red:0,ringGreen:0,colors:[]}
@@ -117,9 +136,11 @@ SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
         return "unknown"
     hwnd:=WinExist(rblxID)
     dx:=Max(1,Round(4*cw/800)),dy:=Max(1,Round(4*ch/599))
-    ; Supplied Hill preview spans about100px: its border is outside the old43px patch.
-    radius:=hill ? 50 : 20
-    rx:=Max(dx,Round(radius*cw/800)),ry:=Max(dy,Round(radius*ch/599))
+    ; Search more of the blue footprint without expanding the terrain-red veto.
+    ; Ground:40px, Hill:50px. Green terrain still uses its original sampling area.
+    terrainRadius:=hill ? 50 : 20
+    terrainRx:=Max(dx,Round(terrainRadius*cw/800)),terrainRy:=Max(dy,Round(terrainRadius*ch/599))
+    rx:=Max(terrainRx,Round(40*cw/800)),ry:=Max(terrainRy,Round(40*ch/599))
     w:=2*rx+3,h:=2*ry+3
     details.reason:="capture-unavailable"
     screen:=DllCall("GetDC","Ptr",0,"Ptr"),memory:=0,bitmap:=0,previous:=0
@@ -200,26 +221,15 @@ SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
             }
             ; Direct pixel reads for pale/dim green only. Blue returned above
             ; without paying for these reads or waiting for green confirmation.
-            strictGreen:=details.green,oldPixelMode:=A_CoordModePixel
-            CoordMode "Pixel","Screen"
-            try {
-                for offset in [[-dx,-dy],[dx,-dy],[0,0],[-dx,dy],[dx,dy]] {
-                    color:=PixelGetColor(cx+x+offset[1],cy+y+offset[2])
-                    g:=(color>>8)&255
-                    if SmartPreviewColorMatches(color,fadedGreenPalette)
-                        && g>=((color>>16)&255)+30 && g>=(color&255)+20
-                        details.fadedGreen++
-                    if SmartPreviewColorMatches(color,redPalette)
-                        details.red++
-                }
-            } finally {
-                CoordMode "Pixel",oldPixelMode
-            }
-            details.green:=Max(details.green,details.fadedGreen)
+            strictGreen:=details.green
+            SmartReadTerrainPixels(cx+x,cy+y,dx,dy,fadedGreenPalette,redPalette,&details)
             state:=details.red>0 ? "red" : details.green>=4 ? "green" : "unknown"
             if state="unknown" && referenceCurrent {
                 ; Dense red veto applies across all three rings, including gaps.
                 loop w*h {
+                    px:=Mod(A_Index-1,w)-rx-1,py:=Floor((A_Index-1)/w)-ry-1
+                    if Abs(px)>terrainRx+1 || Abs(py)>terrainRy+1
+                        continue
                     index:=(A_Index-1)*4,color:=NumGet(bits,index,"UInt") & 0xFFFFFF
                     if SmartPreviewColorMatches(color,redPalette) {
                         state:="red",details.red:=1

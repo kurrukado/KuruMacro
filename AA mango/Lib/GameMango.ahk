@@ -1,18 +1,12 @@
 ﻿#Requires AutoHotkey v2.0
 
-
-
 global macroStartTime := A_TickCount
 
 global stageStartTime := A_TickCount
 
-
-
 global BossRoomCompleted := false
 
 global SaveChestsForBoss := true
-
-
 
 ;HotKeys
 
@@ -23,8 +17,6 @@ Hotkey(F2Key, (*) => StartMacro())
 Hotkey(F3Key, (*) => Reload())
 
 Hotkey(F4Key, (*) => TogglePause())
-
-
 
 ClosePlayerLeaderBoard() {
 
@@ -45,7 +37,26 @@ ClosePlayerLeaderBoard() {
 
 }
 
+PlacementPointUsed(points,point) {
+    for used in points {
+        if Abs(used.x-point.x)<2 && Abs(used.y-point.y)<2
+            return true
+    }
+    return false
+}
 
+PlacementSlotOrder(smart) {
+    if !smart
+        return [1,2,3,4,5,6]
+    slots := []
+    for farmPass in [true,false] {
+        for slot in [1,2,3,4,5,6] {
+            if (GetUnitPlacementType(slot)="Farm")=farmPass
+                slots.Push(slot)
+        }
+    }
+    return slots
+}
 
 PlacingUnits() {
 
@@ -63,8 +74,6 @@ PlacingUnits() {
 
     requestedTotal := 0
 
-
-
     ; A point that failed once stays blocked for the rest of the run: it is
 
     ; usually occupied or off the path, and clicking it again selects the unit
@@ -72,8 +81,6 @@ PlacingUnits() {
     ; already standing there, which looks like a successful new placement.
 
     failedCoordinates := []
-
-
 
     anyEnabled := false
 
@@ -95,8 +102,6 @@ PlacingUnits() {
 
     }
 
-
-
     if (!anyEnabled) {
 
         ProcessLog("No Units Selected - Returning")
@@ -105,27 +110,14 @@ PlacingUnits() {
 
     }
 
-
-
     defaultPoints := smart ? [] : PlacementPatternDropdown.Text = "Circle" ? GenerateCirclePoints() :
 
         PlacementPatternDropdown.Text = "Grid" ? GenerateGridPoints() :
 
             GenerateRandomPoints()
 
-
-
     ; Farm first, then configured non-Farm slots in numerical order.
-    slotOrder:=[1,2,3,4,5,6]
-    if smart {
-        slotOrder:=[]
-        for farmPass in [true,false] {
-            for slot in [1,2,3,4,5,6] {
-                if (GetUnitPlacementType(slot)="Farm")=farmPass
-                    slotOrder.Push(slot)
-            }
-        }
-    }
+    slotOrder := PlacementSlotOrder(smart)
 
     for slotNum in slotOrder {
 
@@ -135,8 +127,6 @@ PlacingUnits() {
 
         enabled := enabled.Value
 
-
-
         ; Get number of placements wanted for this slot
 
         placements := "placement" slotNum
@@ -145,15 +135,11 @@ PlacingUnits() {
 
         placements := Integer(placements.Text)
 
-
-
         ; Initialize count if not exists
 
         if !placedCounts.Has(slotNum)
 
             placedCounts[slotNum] := 0
-
-
 
         ; If enabled, place all units for this slot
 
@@ -163,13 +149,9 @@ PlacingUnits() {
 
             ProcessLog("Placing Unit: " slotNum " (0/" placements ")")
 
-
-
             targetPoints := []
 
             usingCustom := false
-
-
 
             if (!smart && IsSet(UnitPlacements) && UnitPlacements.Has(slotNum) && UnitPlacements[slotNum].Length > 0) {
 
@@ -195,8 +177,6 @@ PlacingUnits() {
                 }
 
             }
-
-
 
             ; Place all units for this slot
 
@@ -225,33 +205,12 @@ PlacingUnits() {
 
                     ; Skip if this coordinate was already used successfully
 
-                    alreadyUsed := false
+                    alreadyUsed := PlacementPointUsed(successfulCoordinates,point)
+                        || (smart && PlacementPointUsed(previewDeferred,point))
 
-                    for coord in successfulCoordinates {
-
-                        if (Abs(coord.x - point.x) < 2 && Abs(coord.y - point.y) < 2) {
-
-                            alreadyUsed := true
-
-                            break
-
-                        }
-
-                    }
-
-                    if smart {
-                        for deferred in previewDeferred {
-                            if Abs(deferred.x-point.x)<2 && Abs(deferred.y-point.y)<2 {
-                                alreadyUsed:=true
-                                break
-                            }
-                        }
-                    }
                     if (alreadyUsed)
 
                         continue
-
-
 
                     alreadyFailed := false
 
@@ -271,11 +230,7 @@ PlacingUnits() {
 
                         continue
 
-
-
                     hadUntestedPoint := true
-
-
 
                     placementResult := smart ? PlaceUnit(point.x, point.y, slotNum, unreadableStreak > 0)
                         : PlaceUnit(point.x, point.y, slotNum)
@@ -328,15 +283,11 @@ PlacingUnits() {
 
                     }
 
-
-
                     ; Verification now polls the panel for ~1.5 s, so a miss is a
 
                     ; real miss. Retry single-count slots too instead of leaving
 
                     ; the unit unplaced while the run still reports success.
-
-
 
                     ; Stop retrying placement coordinates if the game does not
 
@@ -353,11 +304,7 @@ PlacingUnits() {
                         ProcessLog("Placement not verified for unit " slotNum " at " point.x "," point.y "; trying another point")
                     }
 
-
-
                     Wave40Reached()
-
-
 
                     if CheckForXp()
 
@@ -369,13 +316,9 @@ PlacingUnits() {
 
                 }
 
-
-
                 if (stopThisSlot)
 
                     break
-
-
 
                 if (!hadUntestedPoint) {
                     if smart {
@@ -391,8 +334,6 @@ PlacingUnits() {
                     break
 
                 }
-
-
 
                 if (usingCustom && A_Index > 1 && placedCounts[slotNum] < placements) {
 
@@ -418,15 +359,11 @@ PlacingUnits() {
 
     }
 
-
-
     placedTotal := 0
 
     for slotNum, count in placedCounts
 
         placedTotal += count
-
-
 
     if (placedTotal < requestedTotal)
 
@@ -441,19 +378,13 @@ PlacingUnits() {
 
 }
 
-
-
 UpgradeUnits() {
 
     global successfulCoordinates, PriorityUpgrade, priority1, priority2, priority3, priority4, priority5, priority6
 
-
-
     totalUnits := Map()
 
     upgradedCount := Map()
-
-
 
     ; Initialize counters
 
@@ -471,17 +402,11 @@ UpgradeUnits() {
 
     }
 
-
-
     ProcessLog("Process to upgrading...")
-
-
 
     if (PriorityUpgrade.Value) {
 
         ProcessLog("Using priority system")
-
-
 
         ; Go through each priority level (1-6)
 
@@ -513,8 +438,6 @@ UpgradeUnits() {
 
                     }
 
-
-
                     if (!hasUnitsInSlot) {
 
                         continue
@@ -523,15 +446,11 @@ UpgradeUnits() {
 
                     ProcessLog("Priority upgrade for: " priorityNum " (slot " slot ")")
 
-
-
                     ; Keep upgrading current slot until all its units are maxed
 
                     while true {
 
                         slotDone := true
-
-
 
                         for index, coord in successfulCoordinates {
 
@@ -540,8 +459,6 @@ UpgradeUnits() {
                                 slotDone := false
 
                                 upgradeResult := UpgradeUnit(coord.x, coord.y, coord.slot)
-
-
 
                                 if CheckForXp() {
 
@@ -555,8 +472,6 @@ UpgradeUnits() {
 
                                 }
 
-
-
                                 if (upgradeResult = false) {
                                     Sleep(200)
                                     ServiceSummerCards()
@@ -565,7 +480,7 @@ UpgradeUnits() {
                                     continue ; no ability/world clicks when the upgrade was not confirmed
                                 }
 
-                                if (upgradeResult = "limit" || upgradeResult = "max" || MaxUpgrade()) {
+                                if (upgradeResult = "limit" || upgradeResult = "max") {
 
                                     upgradedCount[coord.slot]++
 
@@ -575,35 +490,15 @@ UpgradeUnits() {
 
                                     successfulCoordinates.RemoveAt(index)
 
-                                    CheckAbility()
-
-                                    CloseUnitPanel()
 
                                     break
 
                                 }
 
-
-
                                 Sleep(200)
 
                                 if (ServiceSummerCards() || !UnitActionAllowed())
                                     continue
-
-
-                                CheckAbility()
-
-                                MahogoraAbility()
-
-                                ; click mahogora ability when upgrading
-
-                                FixClick(239, 420)
-
-                                FixClick(298, 420)
-
-                                FixClick(358, 420)
-
-
 
                                 Reconnect()
 
@@ -614,8 +509,6 @@ UpgradeUnits() {
                             }
 
                         }
-
-
 
                         if (slotDone || successfulCoordinates.Length = 0) {
 
@@ -651,13 +544,9 @@ UpgradeUnits() {
 
             }
 
-
-
             for index, coord in successfulCoordinates {
 
                 upgradeResult := UpgradeUnit(coord.x, coord.y, coord.slot)
-
-
 
                 if CheckForXp() {
 
@@ -671,8 +560,6 @@ UpgradeUnits() {
 
                 }
 
-
-
                 if (upgradeResult = false) {
                                     Sleep(200)
                                     ServiceSummerCards()
@@ -680,7 +567,7 @@ UpgradeUnits() {
                                     continue ; no ability/world clicks when the upgrade was not confirmed
                                 }
 
-                                if (upgradeResult = "limit" || upgradeResult = "max" || MaxUpgrade()) {
+                                if (upgradeResult = "limit" || upgradeResult = "max") {
 
                     upgradedCount[coord.slot]++
 
@@ -696,17 +583,10 @@ UpgradeUnits() {
 
                 }
 
-
-
                 Sleep(200)
 
                 if (ServiceSummerCards() || !UnitActionAllowed())
                                     continue
-
-
-                CheckAbility()
-
-                MahogoraAbility()
 
                 Reconnect()
 
@@ -722,19 +602,15 @@ UpgradeUnits() {
 
 }
 
-
-
 IsModeCancelOpen(&outX := 0, &outY := 0) {
 
     global ModeCancel, Greenie, mode
     if (mode = "Infinite" || mode = "Story")
         return !!RegExMatch(SummerReadUI(), "i)select\s+world")
 
-    ; 1. Nhan dien qua anh Greenie.png cua Select World bang ImageSearch
+    ; 1. Nhan dien qua anh Greenie_RGB.png cua Select World bang ImageSearch
 
-    greenieImg := (IsSet(Greenie) && Greenie != "") ? (FileExist(Greenie) ? Greenie : A_ScriptDir "\" Greenie) :
-
-        A_ScriptDir "\GameModeImages\Greenie.png"
+    greenieImg := A_ScriptDir "\GameModeImages\Greenie_RGB.png"
 
     if FileExist(greenieImg) {
 
@@ -772,8 +648,6 @@ IsModeCancelOpen(&outX := 0, &outY := 0) {
 
 }
 
-
-
 ; Walk a fixed lobby route until the map-selection dialog appears.
 ; Story mode always had this guard; every other mode looped forever when
 ; the route failed, which in the log looks like the macro silently hanging.
@@ -805,14 +679,12 @@ WaitForModeDialog(moveFn, modeName, maxAttempts := 10) {
 
 }
 
-
-
 ; Summer Event adapter (not tested end-to-end). UI input uses the same
 ; FixClick and Event movement as the existing macro. CAPTCHA in Function.ahk.
 global SummerAwaitingMatch := false
 global SummerMapName := ""
 global SummerMapInterrupted := false
-OnExit(SummerReleaseMovement)
+OnExit(ReleaseMapMovement)
 
 IsInMatch() {
     global Yen, VoteStart
@@ -851,11 +723,11 @@ SummerClick(x, y) {
     FixClick(x, y)
 }
 
-SummerWalk(key, ms) {
+MapWalk(key, ms) {
     global rblxID
     if !RegExMatch(key,"^[wasd]{1,2}$") || (StrLen(key)=2 && (SubStr(key,1,1)=SubStr(key,2,1)
         || (InStr(key,"w") && InStr(key,"s")) || (InStr(key,"a") && InStr(key,"d"))))
-        || ms<20 || ms>6000 || !SummerMovementReady()
+        || ms<20 || ms>10000 || !MapMovementReady()
         return false
     WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
     oldDelay:=A_KeyDelay, oldDuration:=A_KeyDuration
@@ -866,7 +738,7 @@ SummerWalk(key, ms) {
         loop parse key
             down.="{" A_LoopField " down}"
         SendEvent(down)
-        SetTimer(SummerReleaseMovement,-ms)
+        SetTimer(ReleaseMapMovement,-ms)
         while A_TickCount<deadline {
             if !WinActive(rblxID) || SmartPreviewInterrupted()
                 return false
@@ -874,7 +746,7 @@ SummerWalk(key, ms) {
             if nx!=cx || ny!=cy || nw!=cw || nh!=ch
                 return false
             if A_TickCount>=nextScene && deadline-A_TickCount>500 {
-                if !SummerMovementReady()
+                if !MapMovementReady()
                     return false
                 nextScene:=A_TickCount+500
             }
@@ -882,17 +754,17 @@ SummerWalk(key, ms) {
         }
         return true
     } finally {
-        SetTimer(SummerReleaseMovement,0)
-        SummerReleaseMovement()
+        SetTimer(ReleaseMapMovement,0)
+        ReleaseMapMovement()
         SetKeyDelay(oldDelay,oldDuration)
     }
 }
 
-SummerReleaseMovement(*) {
+ReleaseMapMovement(*) {
     SendEvent("{w up}{a up}{s up}{d up}")
 }
 
-SummerMovementReady() {
+MapMovementReady() {
     global rblxID
     if !WinActive(rblxID) {
         ProcessLog("Map movement stopped: Roblox focus unavailable")
@@ -902,17 +774,22 @@ SummerMovementReady() {
         ProcessLog("Map movement stopped: card/input interruption")
         return false
     }
-    text:=SummerReadUI()
-    if text="" {
+    scene:=ReadResultScreen(false)
+    if !IsObject(scene) || Trim(scene.Text)="" {
         ProcessLog("Map movement stopped: scene unreadable")
         return false
     }
-    if ClassifyResultScreen(text)!="" || RegExMatch(text,"i)\bdefeat\b|\bvictory\b|xp\s+progress|waiting\s+for\s+players|disconnected|choose\s+a\s+card|return\s+to\s+lobby") {
+    if ResultScreenPhase(scene)!="" || RegExMatch(scene.Text,"i)\bdefeat\b|\bvictory\b|xp\s+progress|waiting\s+for\s+players|disconnected|choose\s+a\s+card|return\s+to\s+lobby") {
         ProcessLog("Map movement stopped: result/card/disconnect scene")
         return false
     }
     return true
 }
+
+; Compatibility for external callers. Map routes themselves use generic helpers.
+SummerWalk(key, ms) => MapWalk(key, ms)
+SummerMovementReady() => MapMovementReady()
+SummerReleaseMovement(args*) => ReleaseMapMovement(args*)
 
 SummerVerificationVisible() {
     global rblxID
@@ -1142,7 +1019,7 @@ ParseSummerMapName(text) {
     return found
 }
 
-SummerFindMapImage(assetRoot := A_ScriptDir "\Images\SummerTitles") {
+SummerFindMapImage(assetRoot := A_ScriptDir "\GameModeImages\SummerTitles") {
     global rblxID
     ; RGB title glyphs, not FindText binary/OCR. Tolerance0 passed stored
     ; independent frames and all cross-map negatives; increase only with evidence.
@@ -1320,18 +1197,197 @@ SummerResetSpawn() {
 MoveForSummerCourtyard() {
     SummerResetSpawn()
     PlacementCamera()
-    if !SummerWalk("a", 1200)
+    if !MapWalk("a", 1200)
         return false
     Sleep(250)
     ProcessLog("Summer courtyard movement: spawn -> camera -> a 1200ms; beside enemy path")
     return true
 }
 
+global MansionMapName := ""
+
+InfinityMansionMode() {
+    if !InfinityMansionEnter()
+        return false
+    return RestartStage()
+}
+
+InfinityMansionEnter() {
+    global mode, MatchMaking, MansionMapName
+    mode := "Infinity Mansion"
+    MatchMaking.Value := 0
+    MansionMapName := ""
+    if !InfinityMansionMovement()
+        return false
+    if !InfinityMansionClick("Start")
+        return false
+    if !InfinityMansionClick("Play Here")
+        return false
+    if !InfinityMansionConfirmPortal()
+        return false
+    if !InfinityMansionStartQueue()
+        return false
+    ProcessLog("Infinity Mansion: selected Play Here")
+    return true
+}
+
+InfinityMansionMovement() {
+    global rblxID
+    if !WinExist(rblxID)
+        return false
+    WinActivate(rblxID)
+    if !WinWaitActive(rblxID,,2)
+        return false
+    if InfinityMansionPanelOpen()
+        return true
+    if !InfinityMansionClick("Areas") || !InfinityMansionClick("Infinity Mansion")
+        return false
+    ; Wait for the Areas overlay to disappear after the teleport selection.
+    deadline := A_TickCount + 8000
+    while WinActive(rblxID) && A_TickCount < deadline {
+        WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+        text := OCR.FromRect(cx,cy,cw,ch,"en-US",2).Text
+        if !RegExMatch(text,"i)areas\s*\(click\s+to\s+teleport") {
+            ProcessLog("Infinity Mansion route: A7000ms")
+            if !InfinityMansionWalk("a",7000)
+                return false
+            Sleep(500)
+            ProcessLog("Infinity Mansion route: W600ms")
+            if !InfinityMansionWalk("w",600)
+                return false
+            Sleep(500)
+            if InfinityMansionPanelOpen() {
+                ProcessLog("Infinity Mansion route complete; room panel confirmed")
+                return true
+            }
+            ProcessLog("Infinity Mansion route ended without the room panel; stopping")
+            return false
+        }
+        Sleep(150)
+    }
+    ProcessLog("Infinity Mansion: teleport not confirmed; movement stopped")
+    return false
+}
+
+InfinityMansionPanelOpen() {
+    global rblxID
+    if !WinActive(rblxID)
+        return false
+    try {
+        WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+        text := OCR.FromRect(cx+Round(cw*.25),cy+Round(ch*.12),Round(cw*.5),Round(ch*.72),"en-US",2).Text
+        return RegExMatch(text,"i)infinity\s+mansion") && RegExMatch(text,"i)\broom\s*\d")
+            && RegExMatch(text,"i)\bstart\b")
+    }
+    return false
+}
+
+InfinityMansionConfirmPortal() {
+    if !InfinityMansionClick("Open")
+        return false
+    ProcessLog("Infinity Mansion: confirmed Open Portal")
+    return true
+}
+
+InfinityMansionStartQueue() {
+    return InfinityMansionClick("Start",8000,true)
+}
+
+InfinityMansionQueueVisible(ui,cw) {
+    ; The small waiting/countdown text is often omitted by Windows OCR.
+    ; The queue's map/room label is in the left sidebar; the room picker is central.
+    sidebar := ""
+    for line in ui.Lines {
+        if line.x < cw*.28
+            sidebar .= line.Text " "
+    }
+    return RegExMatch(sidebar,"i)infinity\s+mansion") && RegExMatch(sidebar,"i)\broom\s*\d+")
+}
+
+InfinityMansionClick(label, timeoutMs := 5000, requireQueue := false) {
+    global rblxID
+    deadline := A_TickCount + timeoutMs
+    previousTarget := 0
+    oldMouse := A_CoordModeMouse
+    CoordMode "Mouse","Screen"
+    try {
+        while WinActive(rblxID) && A_TickCount < deadline {
+            WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+            ui := OCR.FromRect(cx,cy,cw,ch,"en-US",2)
+            if requireQueue && !InfinityMansionQueueVisible(ui,cw) {
+                previousTarget := 0
+                Sleep(150)
+                continue
+            }
+            target := 0
+            try {
+                if label = "Infinity Mansion"
+                    target := ui.FindString("i)infinit\w* i)ma\w*ion",1,false,RegExMatch,
+                        {x1:cw*.2,y1:ch*.2,x2:cw*.52,y2:ch*.8})
+                else if label = "Open" {
+                    if RegExMatch(ui.Text,"i)open\s+portal")
+                        target := ui.FindString("Open",1,false,,{x1:cw*.2,y1:ch*.48,x2:cw*.42,y2:ch*.75})
+                }
+                else if requireQueue
+                    target := ui.FindString(label,1,false,,{x1:cw*.3,y1:ch*.65,x2:cw*.7,y2:ch*.88})
+                else
+                    target := ui.FindString(label)
+            }
+            if IsObject(target) {
+                if !IsObject(previousTarget) || Abs(previousTarget.x-target.x)>2 || Abs(previousTarget.y-target.y)>2
+                    || Abs(previousTarget.w-target.w)>2 || Abs(previousTarget.h-target.h)>2 {
+                    previousTarget := target
+                    Sleep(150)
+                    continue
+                }
+                WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
+                if !WinActive(rblxID) || nx!=cx || ny!=cy || nw!=cw || nh!=ch
+                    return false
+                clickX := cx+Round(target.x+target.w/2)
+                clickY := cy+Round(target.y+target.h/2)
+                ProcessLog("Infinity Mansion: " label " target=" clickX "," clickY " client=" cw "x" ch)
+                FixClick(clickX,clickY)
+                ProcessLog("Infinity Mansion: clicked " label)
+                return true
+            }
+            previousTarget := 0
+            Sleep(150)
+        }
+    } catch as err {
+        ProcessLog("Infinity Mansion: lobby control unreadable (" label ")")
+    } finally {
+        CoordMode "Mouse",oldMouse
+    }
+    ProcessLog("Infinity Mansion: " label " unavailable; navigation stopped")
+    return false
+}
+
+InfinityMansionWalk(key, durationMs) {
+    global rblxID
+    if (key != "a" && key != "w") || durationMs < 20 || durationMs > 7000 || !WinActive(rblxID)
+        return false
+    WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+    release := (*) => SendInput("{a up}{w up}")
+    deadline := A_TickCount + durationMs
+    try {
+        SendInput("{" key " down}")
+        SetTimer(release,-durationMs)
+        while A_TickCount < deadline {
+            WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
+            if !WinActive(rblxID) || nx!=cx || ny!=cy || nw!=cw || nh!=ch
+                return false
+            Sleep(Min(20,Max(1,deadline-A_TickCount)))
+        }
+        return true
+    } finally {
+        SetTimer(release,0)
+        release()
+    }
+}
+
 StoryMode() {
 
     global StoryDropdown, StoryActDropdown
-
-
 
     ; Get current map and act
 
@@ -1339,16 +1395,12 @@ StoryMode() {
 
     currentStoryAct := StoryActDropdown.Text
 
-
-
     ; Execute the movement pattern
 
     ProcessLog("Moving to: " currentStoryMap)
 
     if !StoryMovement()
         return false
-
-
 
     ; Start stage
 
@@ -1379,12 +1431,8 @@ StoryMode() {
 
         return
 
-
-
     ; Pick the requested act in the map detail panel before confirming it.
     SelectStoryAct(currentStoryAct)
-
-
 
     ; Handle play mode selection
 
@@ -1412,8 +1460,6 @@ StoryMode() {
 
 }
 
-
-
 PortalMode() {
 
     global PortalDropdown
@@ -1438,8 +1484,6 @@ PortalMode() {
 
 }
 
-
-
 FarmMode() {
 
     ProcessLog("Processing for Farm Mode")
@@ -1457,8 +1501,6 @@ FarmMode() {
     RestartStage()
 
 }
-
-
 
 InfQuestMode() {
 
@@ -1488,13 +1530,9 @@ InfQuestMode() {
 
 }
 
-
-
 LegendMode() {
 
     global LegendDropdown, LegendActDropdown
-
-
 
     ; Get current map and act
 
@@ -1502,16 +1540,12 @@ LegendMode() {
 
     currentLegendAct := LegendActDropdown.Text
 
-
-
     ; Execute the movement pattern
 
     ProcessLog("Moving to: " currentLegendMap)
 
     if !StoryMovement()
         return false
-
-
 
     ; Start stage
 
@@ -1525,8 +1559,6 @@ LegendMode() {
     ProcessLog("Processing: " currentLegendMap " - " currentLegendAct)
 
     StartLegend(currentLegendMap, currentLegendAct)
-
-
 
     ; Handle play mode selection
 
@@ -1542,19 +1574,13 @@ LegendMode() {
 
     }
 
-
-
     RestartStage()
 
 }
 
-
-
 RaidMode() {
 
     global RaidDropdown, RaidActDropdown
-
-
 
     ; Get current map and act
 
@@ -1562,15 +1588,11 @@ RaidMode() {
 
     currentRaidAct := RaidActDropdown.Text
 
-
-
     ; Execute the movement pattern
 
     ProcessLog("Moving to: " currentRaidMap)
 
     RaidMovement()
-
-
 
     ; Start stage
 
@@ -1598,33 +1620,23 @@ RaidMode() {
 
     }
 
-
-
     RestartStage()
 
 }
-
-
 
 InfinityCastleMode() {
 
     global InfinityCastleDropdown
 
-
-
     ; Get current difficulty
 
     currentDifficulty := InfinityCastleDropdown.Text
-
-
 
     ; Execute the movement pattern
 
     ProcessLog("Moving to Infinity Castle")
 
     InfCastleMovement()
-
-
 
     ; Start stage
 
@@ -1635,8 +1647,6 @@ InfinityCastleMode() {
     }
 
     ProcessLog("Starting Infinity Castle - " currentDifficulty)
-
-
 
     ; Select difficulty with direct clicks
 
@@ -1649,8 +1659,6 @@ InfinityCastleMode() {
         FixClick(485, 375)  ; Click Hard Mode
 
     }
-
-
 
     ;Start Inf Castle
 
@@ -1672,13 +1680,9 @@ InfinityCastleMode() {
 
     }
 
-
-
     RestartStage()
 
 }
-
-
 
 DungeonMode() {
 
@@ -1722,15 +1726,11 @@ DungeonMode() {
 
 }
 
-
-
 ClickReplay() {
 
     ClickUntilGone(0, 0, 80, 85, 739, 224, LobbyText, +120, -35, LobbyText2)
 
 }
-
-
 
 ClickNextLevel() {
 
@@ -1738,23 +1738,22 @@ ClickNextLevel() {
 
 }
 
-
-
 ClickReturnToLobby() {
 
     ClickUntilGone(0, 0, 80, 85, 739, 224, LobbyText, 0, -35, LobbyText2)
 
 }
 
-
-
 ChooseResultLabels(matchmaking := 0) {
-    global NextLevelBox, ReplayBox, ReturnLobbyBox
+    global mode, NextLevelBox, NextRoomBox, ReplayBox, ReturnLobbyBox
     if matchmaking || ReturnLobbyBox.Value
         return ["Return to lobby"]
     labels := []
     if !matchmaking {
-        if NextLevelBox.Value
+        if mode = "Infinity Mansion" {
+            if NextRoomBox.Value
+                labels.Push("Next Room")
+        } else if NextLevelBox.Value
             labels.Push("Next Level", "Next Room")
         if ReplayBox.Value
             labels.Push("Replay", "Retry")
@@ -1774,74 +1773,287 @@ ClassifyResultScreen(text) {
     return ""
 }
 
-ReadResultScreen() {
+ReadResultScreen(strictSize := true, readButtons := false) {
     global rblxID
     if !WinActive(rblxID)
         return 0
     try {
         WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
-        if (cw != 800 || ch != 599)
+        if cw<=0 || ch<=0 || (strictSize && (cw!=800 || ch!=599))
             return 0
-        return OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
+        result := OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
+        result.clientW := cw, result.clientH := ch
+        ; Ending paths may lose whole labels against green/yellow buttons.
+        ; Keep their neutral-white ink in bounded layers; ordinary battle reads
+        ; retain the original capture cost. All layers share the final guard.
+        if readButtons && ResultScreenPhase(result)!="summary" {
+            result.resultTextLayers := []
+            for layerIndex, area in [[190,70,600,160],[120,430,560,140]] {
+                ; Choices can show through a reward overlay. Only skip the
+                ; lower prompt scan when summary/reward is already confirmed.
+                if layerIndex=2 && ResultScreenPhase(result)="summary"
+                    break
+                left:=Round(area[1]*cw/800),top:=Round(area[2]*ch/599)
+                width:=Min(cw-left,Round(area[3]*cw/800)),height:=Min(ch-top,Round(area[4]*ch/599))
+                try {
+                    layer:=ReadHighContrastResult(cx+left,cy+top,width,height,3,0,false,true)
+                    for word in layer.Words {
+                        word.x+=left,word.y+=top
+                        word.BoundingRect:={x:word.x,y:word.y,w:word.w,h:word.h}
+                    }
+                    for line in layer.Lines {
+                        line.resultLayer:=true
+                        if line.HasOwnProp("BoundingRect")
+                            line.DeleteProp("BoundingRect")
+                    }
+                    result.resultTextLayers.Push(layer)
+                }
+            }
+        }
+        WinGetClientPos(&nx, &ny, &nw, &nh, rblxID)
+        if !WinActive(rblxID) || nx!=cx || ny!=cy || nw!=cw || nh!=ch
+            return 0
+        return result
     }
     return 0
 }
 
 ResultScreenReady() {
     result := ReadResultScreen()
+    if IsObject(result) && ResultScreenPhase(result)=""
+        && RegExMatch(result.Text,"i)\bxp\s*progr|\bvictory\b|\bdefeat\b|click.*continue")
+        result:=ReadResultScreen(true,true)
     return ResultScreenPhase(result) != ""
+}
+
+ResultTextLines(result) {
+    lines:=[]
+    if !IsObject(result)
+        return lines
+    try {
+        for line in result.Lines
+            lines.Push(line)
+        if result.HasProp("resultTextLayers") {
+            for layer in result.resultTextLayers {
+                for line in layer.Lines
+                    lines.Push(line)
+            }
+        }
+    }
+    return lines
+}
+
+ResultText(result) {
+    if !IsObject(result)
+        return ""
+    text:=result.Text
+    if result.HasProp("resultTextLayers") {
+        for layer in result.resultTextLayers
+            text.=" " layer.Text
+    }
+    return text
+}
+
+FindResultButton(result, label, phase := "choices") {
+    if !IsObject(result)
+        return 0
+    static patterns := Map("Next Room", "^nex[t7]r[o0][o0](?:m|rn)$",
+        "Next Level", "^nex[t7]leve[l1i]$", "Replay", "^rep[l1i]ay$",
+        "Retry", "^retry$", "Return to lobby", "^ret(?:urn|um)(?:to|w)?l[o0]bby$",
+        "Next", "^nex[t7]$")
+    if !patterns.Has(label)
+        return 0
+    sx := result.HasProp("clientW") ? result.clientW/800 : 1
+    sy := result.HasProp("clientH") ? result.clientH/599 : 1
+    band := phase="summary" ? [240*sx,350*sy,420*sx,450*sy] : [190*sx,70*sy,680*sx,180*sy]
+    inBand := (r) => r.x+r.w/2>=band[1] && r.x+r.w/2<=band[3]
+        && r.y+r.h/2>=band[2] && r.y+r.h/2<=band[4]
+    try {
+        rect := result.FindString(label)
+        if IsObject(rect) && inBand(rect) {
+            rect.source:="ocr"
+            return rect
+        }
+    }
+    ; Match bounded word groups, allowing spacing/punctuation and a few measured
+    ; OCR confusions. Never guess a button from its color or a fixed click point.
+    try {
+        for line in ResultTextLines(result) {
+            for first, word in line.Words {
+                compact := "", left := word.x, top := word.y, right := word.x, bottom := word.y
+                loop Min(4,line.Words.Length-first+1) {
+                    part := line.Words[first+A_Index-1]
+                    if part.x<band[1] || part.y<band[2] || part.x+part.w>band[3] || part.y+part.h>band[4]
+                        break
+                    compact .= RegExReplace(StrLower(part.Text),"[^a-z0-9]")
+                    left:=Min(left,part.x),top:=Min(top,part.y)
+                    right:=Max(right,part.x+part.w),bottom:=Max(bottom,part.y+part.h)
+                    if RegExMatch(compact,patterns[label])
+                        return {x:left,y:top,w:right-left,h:bottom-top,source:line.HasProp("resultLayer") ? "masked-ocr" : "ocr"}
+                }
+            }
+        }
+    }
+    return 0
 }
 
 ResultScreenPhase(result) {
     if !IsObject(result)
         return ""
-    phase := ClassifyResultScreen(result.Text)
-    if (phase != "")
-        return phase
-    ; Public matchmaking may show only Return to lobby, without Replay or
-    ; Waiting for Players. Its exact label AND measured top-button band are
-    ; required; the settings-row Return to Lobby is far outside this band.
-    if RegExMatch(result.Text, "i)choose\s+a\s+card|vote\s+start|the\s+weather\s+shifts")
+    text:=ResultText(result)
+    ; A visible result button is sufficient even if OCR mangles its neighbour
+    ; (observed: "Return Wlobby" beside a correctly read "Next Room").
+    if RegExMatch(text, "i)choose\s+a\s+card|vote\s+start|the\s+weather\s+shifts")
         return ""
-    try {
-        rect := result.FindString("Return to lobby")
-        x := rect.x + rect.w / 2, y := rect.y + rect.h / 2
-        if (x >= 190 && x <= 680 && y >= 70 && y <= 180)
+    ; A reward overlay can sit above already-visible end-of-match buttons.
+    phase := ClassifyResultScreen(text)
+    if ResultRewardPageVisible(result) || (phase="summary"
+        && IsObject(FindResultButton(result,"Next","summary")))
+        || ResultSummaryVisible(result)
+        return "summary"
+    for label in ["Return to lobby","Next Room","Next Level","Replay","Retry"] {
+        if IsObject(FindResultButton(result,label))
             return "choices"
     }
+    if phase!=""
+        return phase
     return ""
+}
+
+ResultSummaryVisible(result) {
+    if !IsObject(result) || !IsObject(FindResultButton(result,"Next","summary"))
+        return false
+    sx:=result.HasProp("clientW") ? result.clientW/800 : 1
+    sy:=result.HasProp("clientH") ? result.clientH/599 : 1
+    ; The unit panel can cover Victory/Total Time/Waves. The right XP title
+    ; and the lower Next button remain visible in the observed stuck scene.
+    try {
+        for line in ResultTextLines(result) {
+            if line.x<500*sx || line.x>790*sx || line.y<100*sy || line.y>230*sy
+                continue
+            if RegExMatch(RegExReplace(StrLower(line.Text),"[^a-z0-9]"),"^xppr[o0]gre[s5]{1,2}$")
+                return true
+        }
+    }
+    return false
+}
+
+ResultRewardPageVisible(result) {
+    if !IsObject(result)
+        return false
+    if IsObject(FindResultRewardPrompt(result))
+        return true
+    sx:=result.HasProp("clientW") ? result.clientW/800 : 1
+    sy:=result.HasProp("clientH") ? result.clientH/599 : 1
+    try {
+        for line in ResultTextLines(result) {
+            if line.x<120*sx || line.x>680*sx || line.y<150*sy || line.y>450*sy
+                continue
+            if RegExMatch(line.Text,"i)^\s*(?:rewards?|loot|(?:items?\s+|you\s+)?received)\b")
+                && !RegExMatch(line.Text,"i)boost|bonus|party|modif")
+                return true
+        }
+    }
+    return false
+}
+
+FindResultRewardPrompt(result) {
+    if !IsObject(result)
+        return 0
+    sx:=result.HasProp("clientW") ? result.clientW/800 : 1
+    sy:=result.HasProp("clientH") ? result.clientH/599 : 1
+    try {
+        for line in ResultTextLines(result) {
+            if line.x<120*sx || line.x>680*sx || line.y<430*sy || line.y>570*sy
+                continue
+            text:=RegExReplace(StrLower(line.Text),"[^a-z0-9]")
+            if RegExMatch(text,"^(?:cl[i1l]ck|tap)an[yv]w[h]?eretocontinue$")
+                return {x:line.x,y:line.y,w:line.w,h:line.h}
+        }
+    }
+    return 0
+}
+
+ClickResultButton(x,y) {
+    global rblxID
+    if !WinActive(rblxID)
+        return false
+    oldMouseMode:=A_CoordModeMouse
+    CoordMode "Mouse","Client"
+    try FixClick(x,y)
+    finally CoordMode "Mouse",oldMouseMode
+    return true
+}
+
+SkipResultRewards(initialResult := 0, maxClicks := 5) {
+    result:=IsObject(initialResult) ? initialResult : ReadResultScreen(true,true)
+    if !IsObject(result) || ResultScreenPhase(result)!="summary"
+        return false
+    anchor:=FindResultButton(result,"Next","summary")
+    if !IsObject(anchor)
+        anchor:=FindResultRewardPrompt(result)
+    if !IsObject(anchor)
+        return false
+    x:=Round(anchor.x+anchor.w/2),y:=Round(anchor.y+anchor.h/2)
+    misses:=0,clicks:=0
+    while clicks<maxClicks {
+        fresh:=ReadResultScreen(true,true)
+        if !IsObject(fresh)
+            return false
+        if RegExMatch(ResultText(fresh),"i)choose\s+a\s+card|the\s+weather\s+shifts|vote\s+start|disconnected|waiting\s+for\s+players|select\s+world|travell?ing\s+to")
+            return false
+        phase:=ResultScreenPhase(fresh)
+        button:=FindResultButton(fresh,"Next","summary")
+        rewardPage:=ResultRewardPageVisible(fresh)
+        ; Keep five beats even if choices appear early: rewards may arrive late.
+        ; The cached anchor is in the lower summary band, away from choices.
+        if !IsObject(button) && phase!="summary" && phase!="choices" && !rewardPage {
+            if ++misses>=3 {
+                ProcessLog("Result UI: reward page unreadable; stopping reward clicks")
+                return false
+            }
+            Sleep(500)
+            continue
+        }
+        misses:=0
+        if IsObject(button)
+            x:=Round(button.x+button.w/2),y:=Round(button.y+button.h/2)
+        if !ClickResultButton(x,y)
+            return false
+        clicks++
+        ProcessLog("Result UI: skipping summary/reward " clicks "/" maxClicks)
+        Sleep(500)
+    }
+    return true
 }
 
 TryResultAction(&action := "") {
     global MatchMaking
     action := ""
-    result := ReadResultScreen()
+    result := ReadResultScreen(true,true)
     if !IsObject(result)
         return false
     phase := ResultScreenPhase(result)
     if (phase = "")
         return false
-    labels := phase = "summary" ? ["Next"] : ChooseResultLabels(MatchMaking.Value)
+    if phase="summary" {
+        if !SkipResultRewards(result)
+            return false
+        action:="next"
+        return true
+    }
+    labels := ChooseResultLabels(MatchMaking.Value)
     chosenLabel := ""
     for label in labels {
-        try rect := result.FindString(label)
-        catch
-            continue
+        rect := FindResultButton(result,label,phase)
         if !IsObject(rect)
             continue
-        x := Round(rect.x + rect.w / 2), y := Round(rect.y + rect.h / 2)
-        if (phase = "summary") {
-            if (x < 240 || x > 420 || y < 350 || y > 450)
-                continue
-        } else if (x < 190 || x > 680 || y < 70 || y > 180) {
-            continue
-        }
         chosenLabel := label
         break
     }
     if (chosenLabel = "")
         return false
-    fresh := ReadResultScreen()
+    fresh := ReadResultScreen(true,true)
     if !IsObject(fresh) || ResultScreenPhase(fresh) != phase
         return false
     allowed:=false
@@ -1851,21 +2063,14 @@ TryResultAction(&action := "") {
     }
     if !allowed
         return false
-    try rect:=fresh.FindString(chosenLabel)
-    catch
-        return false
+    rect := FindResultButton(fresh,chosenLabel,phase)
     if !IsObject(rect)
         return false
     x:=Round(rect.x+rect.w/2),y:=Round(rect.y+rect.h/2)
-    if phase="summary" {
-        if x<240 || x>420 || y<350 || y>450
-            return false
-    } else if x<190 || x>680 || y<70 || y>180 {
+    if !ClickResultButton(x, y)
         return false
-    }
-    SummerClick(x, y)
-    action := (chosenLabel = "Next Level" || chosenLabel = "Next Room") ? "next_level" : (chosenLabel = "Return to lobby" ? "lobby" : (chosenLabel = "Next" ? "next" : "replay"))
-    ProcessLog("Result UI: " chosenLabel " -> action=" action " (matchmaking=" MatchMaking.Value ")")
+    action := chosenLabel = "Next Room" ? "next_room" : (chosenLabel = "Next Level" ? "next_level" : (chosenLabel = "Return to lobby" ? "lobby" : (chosenLabel = "Next" ? "next" : "replay")))
+    ProcessLog("Result UI: " chosenLabel " at " x "," y " -> action=" action " (" rect.source ", matchmaking=" MatchMaking.Value ")")
     Sleep(500)
     return true
 }
@@ -1873,11 +2078,34 @@ TryResultAction(&action := "") {
 ContinueAfterResult(action) {
     global mode, SummerAwaitingMatch, SummerMapName
     deadline := A_TickCount + 45000
+    retries:=0,stableMenu:=0,nextRetry:=A_TickCount+3000
     while (A_TickCount < deadline) {
-        result := ReadResultScreen()
-        if IsObject(result) && Trim(result.Text)!="" && ResultScreenPhase(result) = "" {
-            if (action != "lobby" || RegExMatch(result.Text, "i)\bareas\b"))
-                break
+        result := ReadResultScreen(true,true)
+        if IsObject(result) && Trim(ResultText(result))!="" {
+            phase:=ResultScreenPhase(result)
+            moving:=RegExMatch(ResultText(result),"i)te[li1]ep[o0]rting|connecting")
+            if phase="" && !moving {
+                if (action != "lobby" || RegExMatch(result.Text, "i)\bareas\b"))
+                    break
+            }
+            if phase="choices" && !moving {
+                stableMenu++
+                if stableMenu>=3 && retries<2 && A_TickCount>=nextRetry {
+                    ; A click can be ignored while reward UI is settling. Retry
+                    ; only a freshly re-read choice, never during teleporting.
+                    if TryResultAction(&retryAction) {
+                        if retryAction!="next"
+                            action:=retryAction
+                        retries++
+                        ProcessLog("Result UI: unchanged menu; verified retry " retries "/2")
+                    }
+                    stableMenu:=0,nextRetry:=A_TickCount+3000
+                }
+            } else {
+                stableMenu:=0
+            }
+        } else {
+            stableMenu:=0
         }
         Sleep(500)
     }
@@ -1892,9 +2120,11 @@ ContinueAfterResult(action) {
     }
     if (mode = "Summer Event") {
         SummerMapName := "Summer Event"
-        ProcessLog("Summer Event: continuing after " (action="next_level" ? "Next Level / Room" : "Replay") "; reading the new map")
+        ProcessLog("Summer Event: continuing after " ((action="next_level" || action="next_room") ? "Next Level / Room" : "Replay") "; reading the new map")
         return RestartStage("Summer Event")
     }
+    if mode = "Infinity Mansion" && action = "next_room"
+        ProcessLog("Infinity Mansion: Next Room selected; detecting the new room's loading cover")
     return RestartStage()
 }
 
@@ -1913,16 +2143,11 @@ MonitorEndScreen() {
     return false
 }
 
-
 MonitorStage() {
 
     global Wins, loss, mode, StoryActDropdown, CARD_ENABLED, lastResult
 
-
-
     lastClickTime := A_TickCount
-
-
 
     loop {
 
@@ -1945,8 +2170,6 @@ MonitorStage() {
 
                 FixClick(560, 560) ; Move click
 
-
-
                 ;mahogora ability checker
 
                 FixClick(239, 400)
@@ -1954,8 +2177,6 @@ MonitorStage() {
                 FixClick(298, 400)
 
                 FixClick(358, 400)
-
-
 
                 MahogoraAbility()
 
@@ -1965,23 +2186,21 @@ MonitorStage() {
 
                 }
 
-
-
                 lastClickTime := A_TickCount
 
             }
 
         }
 
-
-
         ; Check for XP screen
 
         if CheckForXp() {
 
             ProcessLog("Checking win/loss status...")
-
-
+            ; A selected unit can cover the result title and totals. Close only
+            ; its confirmed panel before reading the outcome / reward pages.
+            if FindUnitPanel(&panelX,&panelY)
+                CloseUnitPanel()
 
             ; Calculate stage end time here, before checking win/loss
 
@@ -1989,15 +2208,11 @@ MonitorStage() {
 
             stageLength := FormatStageTime(stageEndTime - stageStartTime)
 
-
-
             if (ok := FindText(&X, &Y, 300, 190, 360, 250, 0.20, 0.20, UnitExit)) {
 
                 ClickUntilGone(0, 0, 300, 190, 360, 250, UnitExit, -4, -35)
 
             }
-
-
 
             ; Check for Victory or Defeat
 
@@ -2035,10 +2250,6 @@ MonitorStage() {
 
                     return MonitorDungeonEnd()  ; New function for Dungeon endings
 
-                } else if (mode = "Daily Infinite Quest") {
-
-                    return Wave40Reached() ; new function for daily endings
-
                 } else {
 
                     return MonitorEndScreen()  ; Original behavior for other modes
@@ -2060,8 +2271,6 @@ MonitorStage() {
     }
 
 }
-
-
 
 StoryMovement() {
     global rblxID, aaMainUIHwnd
@@ -2105,8 +2314,6 @@ StoryMovement() {
         release()
     }
 }
-
-
 
 ;go to Walled City for worthy farm
 
@@ -2186,8 +2393,6 @@ FarmMovement() {
 
 }
 
-
-
 Wave40Reached() {
 
     global rblxID, ShowUpgradeUIOnLeftImg, mode, MatchMaking
@@ -2201,8 +2406,6 @@ Wave40Reached() {
     if !FindText(&x, &y, 186, 97, 256, 124, 0, 0, Wave40Inf)
 
         return false
-
-
 
     ProcessLog("Wave 40 has been reached")
 
@@ -2221,8 +2424,6 @@ Wave40Reached() {
         settingsOpened := true
 
         Sleep(700)
-
-
 
         ; The panel reopens wherever it was last scrolled, so reset to the top
         ; before stepping down. FixMove is required: Roblox ignores wheel input
@@ -2245,8 +2446,6 @@ Wave40Reached() {
         WinActivate(rblxID)
 
         Sleep(200)
-
-
 
         ; "Return to Lobby" sits two rows below "Show Upgrade UI on left", so
         ; locate that row and offset to its button. The row also has to sit high
@@ -2292,8 +2491,6 @@ Wave40Reached() {
 
         }
 
-
-
         if !ready {
 
             ProcessLog("Could not find 'Show Upgrade UI on left' in Settings")
@@ -2302,16 +2499,12 @@ Wave40Reached() {
 
         }
 
-
-
         ; Measured on the live panel: the toggle centre is foundY + 27 and the
         ; Return to Lobby button sits another 109px below that.
 
         lobbyX := foundX + 287
 
         lobbyY := foundY + 136
-
-
 
         WinActivate(rblxID)
 
@@ -2341,21 +2534,15 @@ Wave40Reached() {
 
     }
 
-
-
     return false
 
 }
-
-
 
 PortalSearch() { ; try to search portal in items bags
 
     DemonsPlaceColor := 0xFF60FF
 
     ShibuyaColor := 0x86FEFF
-
-
 
     ProcessLog("Searching for Portal...")
 
@@ -2441,8 +2628,6 @@ PortalSearch() { ; try to search portal in items bags
 
 }
 
-
-
 PortalMovement() {
 
     PortalSearch()
@@ -2468,8 +2653,6 @@ PortalMovement() {
     Sleep(1000)
 
 }
-
-
 
 FoundMapType() { ; just use for infinite daily quest mode
 
@@ -2511,8 +2694,6 @@ FoundMapType() { ; just use for infinite daily quest mode
 
 }
 
-
-
 EnterNavMode(steps) {
 
     SendInput("{LShift down}\{LShift up}") ; enable nav key
@@ -2535,15 +2716,11 @@ EnterNavMode(steps) {
 
 }
 
-
-
 InfQuestMovement() {
 
     FixClick(640, 70) ; close player board
 
     Sleep(500)
-
-
 
     FixClick(770, 280) ; open quest
 
@@ -2552,8 +2729,6 @@ InfQuestMovement() {
     FixClick(453, 157) ; choose inf quest
 
     Sleep(500)
-
-
 
     if (FindText(&x, &y, 216, 190, 587, 516, 0, 0, ClaimText)) { ; claim reward
 
@@ -2569,11 +2744,7 @@ InfQuestMovement() {
 
     Sleep(1000)
 
-
-
     mapSteps := 0
-
-
 
     loop i := 1 {
 
@@ -2590,8 +2761,6 @@ InfQuestMovement() {
         i++
 
     }
-
-
 
     if (mapSteps > 0) {
 
@@ -2612,13 +2781,9 @@ InfQuestMovement() {
 
     }
 
-
-
     Sleep(500)
 
 }
-
-
 
 RaidMovement() {
 
@@ -2645,8 +2810,6 @@ RaidMovement() {
     SendInput ("{w up}")
 
 }
-
-
 
 InfCastleMovement() {
 
@@ -2675,8 +2838,6 @@ InfCastleMovement() {
     Sleep (500)
 
 }
-
-
 
 ; Roblox keeps showing "Don't Miss Out!" event toasts in the top-right corner.
 ; Their red close button sits at x≈767 and the toast cards cover the first rows
@@ -2735,13 +2896,9 @@ DismissPromoPopups(maxPopups := 4) {
 
 }
 
-
-
 StartStory() {
 
     ClosePlayerLeaderBoard()
-
-
 
     ; The Select World list always opens scrolled to the top, so Planet
     ; Greenie is the first card. The "Don't Miss Out!" promo toasts overlap
@@ -2750,8 +2907,6 @@ StartStory() {
     DismissPromoPopups()
 
     CoordMode "Pixel", "Client"
-
-
 
     ProcessLog("Selecting Planet Greenie (first card in Select World)")
 
@@ -2775,8 +2930,6 @@ StartStory() {
 
 }
 
-
-
 StartLegend(map, LegendActDropdown) {
 
     ClosePlayerLeaderBoard()
@@ -2797,8 +2950,6 @@ StartLegend(map, LegendActDropdown) {
 
     SendInput("{Enter}") ; Opens Legend Stage
 
-
-
     downArrows := GetLegendDownArrows(map) ; Map selection down arrows
 
     loop downArrows {
@@ -2809,13 +2960,9 @@ StartLegend(map, LegendActDropdown) {
 
     }
 
-
-
     SendInput("{Enter}") ; Select LegendStage
 
     Sleep(500)
-
-
 
     loop 4 {
 
@@ -2825,13 +2972,9 @@ StartLegend(map, LegendActDropdown) {
 
     }
 
-
-
     SendInput("{Left}") ; Go to act selection
 
     Sleep(1000)
-
-
 
     actArrows := GetLegendActDownArrows(LegendActDropdown) ; Act selection down arrows
 
@@ -2842,8 +2985,6 @@ StartLegend(map, LegendActDropdown) {
         Sleep(200)
 
     }
-
-
 
     SendInput("{Enter}") ; Select Act
 
@@ -2856,8 +2997,6 @@ StartLegend(map, LegendActDropdown) {
     }
 
 }
-
-
 
 StartRaid(map, RaidActDropdown) {
 
@@ -2873,8 +3012,6 @@ StartRaid(map, RaidActDropdown) {
 
     Sleep(500)
 
-
-
     downArrows := GetRaidDownArrows(map) ; Map selection down arrows
 
     loop downArrows {
@@ -2885,11 +3022,7 @@ StartRaid(map, RaidActDropdown) {
 
     }
 
-
-
     SendInput("{Enter}") ; Select Raid
-
-
 
     loop 4 {
 
@@ -2899,13 +3032,9 @@ StartRaid(map, RaidActDropdown) {
 
     }
 
-
-
     SendInput("{Left}") ; Go to act selection
 
     Sleep(500)
-
-
 
     actArrows := GetRaidActDownArrows(RaidActDropdown) ; Act selection down arrows
 
@@ -2916,8 +3045,6 @@ StartRaid(map, RaidActDropdown) {
         Sleep(200)
 
     }
-
-
 
     SendInput("{Enter}") ; Select Act
 
@@ -2930,8 +3057,6 @@ StartRaid(map, RaidActDropdown) {
     }
 
 }
-
-
 
 ; Click the requested act tab in the map detail panel. The panel only lists the
 ; acts that exist for the selected world and labels the infinite one "Infinite"
@@ -2964,8 +3089,6 @@ SelectStoryAct(actName) {
 
 }
 
-
-
 PlayHere() {
 
     FixClick(400, 440)  ; 1. Select Act / Infinity
@@ -2985,8 +3108,6 @@ PlayHere() {
     Sleep(400)
 
 }
-
-
 
 FindMatch() {
     startTime := A_TickCount
@@ -3014,8 +3135,6 @@ FindMatch() {
         return true
     }
 }
-
-
 
 GetStoryDownArrows(map) {
 
@@ -3069,8 +3188,6 @@ GetStoryDownArrows(map) {
 
 }
 
-
-
 GetStoryActDownArrows(StoryActDropdown) {
 
     switch StoryActDropdown {
@@ -3093,8 +3210,6 @@ GetStoryActDownArrows(StoryActDropdown) {
 
 }
 
-
-
 GetPortalDownType(PortalDropdown) {
 
     switch PortalDropdown {
@@ -3108,8 +3223,6 @@ GetPortalDownType(PortalDropdown) {
     }
 
 }
-
-
 
 GetLegendDownArrows(map) {
 
@@ -3131,8 +3244,6 @@ GetLegendDownArrows(map) {
 
 }
 
-
-
 GetLegendActDownArrows(LegendActDropdown) {
 
     switch LegendActDropdown {
@@ -3147,8 +3258,6 @@ GetLegendActDownArrows(LegendActDropdown) {
 
 }
 
-
-
 GetRaidDownArrows(map) {
 
     switch map {
@@ -3162,8 +3271,6 @@ GetRaidDownArrows(map) {
     }
 
 }
-
-
 
 GetRaidActDownArrows(RaidActDropdown) {
 
@@ -3182,8 +3289,6 @@ GetRaidActDownArrows(RaidActDropdown) {
     }
 
 }
-
-
 
 Zoom() {
 
@@ -3217,8 +3322,6 @@ Zoom() {
 
 }
 
-
-
 TpSpawn() {
 
     global rblxID
@@ -3241,8 +3344,6 @@ TpSpawn() {
 
         Sleep(450)
 
-
-
         ; The panel reopens at its last scroll position, so scan what is already
 
         ; on screen before nudging the list. Resetting to the top every time cost
@@ -3264,8 +3365,6 @@ TpSpawn() {
         }
 
         Sleep(200)
-
-
 
         ; The Gameplay section now has Disable Auto-Open Upgrade UI.
         ; Keep its value and locate the teleport row by its current label.
@@ -3298,13 +3397,9 @@ TpSpawn() {
 
     }
 
-
-
     PlacementCamera()
 
 }
-
-
 
 FindUpgradeToggleRow() {
 
@@ -3380,7 +3475,6 @@ FindUpgradeToggleRow() {
 
 }
 
-
 ToggleIsOn(x, y) {
 
     c := PixelGetColor(x, y, "RGB")
@@ -3396,8 +3490,6 @@ ToggleIsOn(x, y) {
     return ((g > 140 && r < 150 && b < 150) || (r > 150 && g < 130 && b < 130))
 
 }
-
-
 
 IsControlPixel(x, y) {
 
@@ -3415,8 +3507,6 @@ IsControlPixel(x, y) {
 
 }
 
-
-
 ArrowNear(x, y) {
 
     ; The row pitch measured on the live panel is ~53px, but the button circle
@@ -3425,7 +3515,6 @@ ArrowNear(x, y) {
     return (IsControlPixel(x, y) || IsControlPixel(x, y - 4) || IsControlPixel(x, y + 4) || IsControlPixel(x, y - 8) || IsControlPixel(x, y + 8))
 
 }
-
 
 ; Roblox paints the chat button as a solid white speech bubble while the log is
 ; open and as an outlined bubble while it is closed. Sampling the bubble's
@@ -3454,8 +3543,6 @@ IsChatOpen() {
     }
 
 }
-
-
 
 CloseChat() {
 
@@ -3487,8 +3574,6 @@ CloseChat() {
 
 }
 
-
-
 BasicSetup() {
 
     FixClick(565, 73) ; Close the in-match leaderboard
@@ -3507,8 +3592,6 @@ BasicSetup() {
 
 }
 
-
-
 DetectMap(timeoutMs := 300000) {
     global mode, rblxID, SummerMapInterrupted
     isSummer := mode="Summer Event"
@@ -3518,8 +3601,6 @@ DetectMap(timeoutMs := 300000) {
     ProcessLog("Moving into the map...")
 
     startTime := A_TickCount
-
-
 
     loop {
         if isSummer {
@@ -3563,21 +3644,19 @@ DetectMap(timeoutMs := 300000) {
 
         }
 
-
-
         ; Check for vote screen
 
-        if (ok := FindText(&X, &Y, 333, 61, 465, 101, 0, 0, VoteStart) or (ok := FindText(&X, &Y, 340, 537, 468,
+        if !isSummer && (FindVoteStart(&X,&Y) || RegularMatchHudVisible()) {
 
-            557, 0, 0, Yen))) {
-
-            ProcessLog("Map not found")
+            ProcessLog("Loading cover unknown; match HUD/Vote Start confirmed, continuing without map movement")
 
             return "no map found"
 
         }
-
-
+        if !isSummer && ResultScreenReady() {
+            ProcessLog("Loading interrupted by result screen; leaving cover recognition")
+            return "no map found"
+        }
 
         try {
             WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
@@ -3632,8 +3711,6 @@ DetectMap(timeoutMs := 300000) {
 
         )
 
-
-
         for mapName, pattern in mapPatterns {
 
             found := false
@@ -3661,8 +3738,6 @@ DetectMap(timeoutMs := 300000) {
 
             }
 
-
-
             if (found) {
 
                 ProcessLog("Map found: " mapName)
@@ -3673,8 +3748,6 @@ DetectMap(timeoutMs := 300000) {
 
         }
 
-
-
         Sleep 1000
 
         Reconnect()
@@ -3683,14 +3756,10 @@ DetectMap(timeoutMs := 300000) {
 
 }
 
-
-
 HandleMapMovement(MapName) {
     ; All modes, including Summer, use the route for the recognized map.
 
     ProcessLog("Moving to: " MapName)
-
-
 
     switch MapName {
 
@@ -3699,11 +3768,11 @@ HandleMapMovement(MapName) {
 
         case "Planet Greenie":
 
-            MoveForGreenie()
+            return MoveForGreenie()
 
         case "Snowy Town":
 
-            MoveForSnowyTown()
+            return MoveForSnowyTown()
 
         case "Snowy Kingdom":
             return MoveForSnowyKingdom()
@@ -3720,31 +3789,31 @@ HandleMapMovement(MapName) {
 
         case "Magic Town":
 
-            MoveForMagicTown()
+            return MoveForMagicTown()
 
         case "Magic Hill":
 
-            MoveForMagicHill()
+            return MoveForMagicHill()
 
         case "Navy Bay":
 
-            MoveForNavyBay()
+            return MoveForNavyBay()
 
         case "Fiend City":
 
-            MoveForFiendCity()
+            return MoveForFiendCity()
 
         case "Spirit World":
 
-            MoveForSpiritWorld()
+            return MoveForSpiritWorld()
 
         case "Haunted Academy":
 
-            MoveForHauntedAcademy()
+            return MoveForHauntedAcademy()
 
         case "Space Center":
 
-            MoveForSpaceCenter()
+            return MoveForSpaceCenter()
 
         case "Mountain Temple":
 
@@ -3752,23 +3821,23 @@ HandleMapMovement(MapName) {
 
         case "Cursed Festival":
 
-            MoveForCursedFestival()
+            return MoveForCursedFestival()
 
         case "Nightmare Train":
 
-            MoveForNightmareTrain()
+            return MoveForNightmareTrain()
 
         case "Air Craft":
 
-            MoveForAirCraft()
+            return MoveForAirCraft()
 
         case "Hellish City":
 
-            MoveForHellish()
+            return MoveForHellish()
 
         case "Shibuya District":
 
-            MoveForShibuya()
+            return MoveForShibuya()
 
         default:
             ProcessLog("No movement route for " MapName "; continuing normal placement at current position")
@@ -3779,51 +3848,32 @@ HandleMapMovement(MapName) {
 
 }
 
-
-
 MoveForSacredPlanet() {
     SummerResetSpawn()
-    if !SummerWalk("w",4000)
+    if !MapWalk("w",4000)
         return false
-    if !SummerWalk("a",2000)
+    if !MapWalk("a",2000)
         return false
     ProcessLog("Sacred Planet movement complete: teleport spawn -> W4000ms -> A2000ms; keys released")
     return true
 }
 
 MoveForGreenie() {
-
-    SendInput ("{a down}")
-
-    SendInput ("{w down}")
-
-    Sleep (2200)
-
-    SendInput ("{a up}")
-
-    SendInput ("{w up}")
-
+    if !MapWalk("aw",2200)
+        return false
+    return true
 }
-
-
 
 MoveForSnowyTown() {
-
-    SendInput("{d down}")
-
-    Sleep(2000)
-
-    SendInput("{d up}")
-
+    if !MapWalk("d",2000)
+        return false
     Sleep(500)
-
+    return true
 }
-
-
 
 MoveForRainVillage() {
     ProcessLog("Rain Village movement: A+S500ms")
-    if !SummerWalk("as",500)
+    if !MapWalk("as",500)
         return false
     ProcessLog("Rain Village movement complete; all movement keys released")
     return true
@@ -3831,7 +3881,7 @@ MoveForRainVillage() {
 
 MoveForDungeonThrone() {
     ProcessLog("Dungeon Throne movement: D6000ms")
-    if !SummerWalk("d",6000)
+    if !MapWalk("d",6000)
         return false
     ProcessLog("Dungeon Throne movement complete; all movement keys released")
     return true
@@ -3839,91 +3889,54 @@ MoveForDungeonThrone() {
 
 MoveForSnowyKingdom() {
     ProcessLog("Snowy Kingdom movement: W+D6000ms")
-    if !SummerWalk("wd",6000)
+    if !MapWalk("wd",6000)
         return false
     ProcessLog("Snowy Kingdom movement: W+D released; wait500ms")
     Sleep(500)
     ProcessLog("Snowy Kingdom movement: W+A1000ms")
-    if !SummerWalk("wa",1000)
+    if !MapWalk("wa",1000)
         return false
     ProcessLog("Snowy Kingdom movement complete; all movement keys released")
     return true
 }
 
 MoveForNavyBay() {
-
-    SendInput ("{a down}")
-
-    SendInput ("{w down}")
-
-    Sleep (1700)
-
-    SendInput ("{a up}")
-
-    SendInput ("{w up}")
-
+    if !MapWalk("aw",1700)
+        return false
+    return true
 }
-
-
 
 MoveForFiendCity() {
-
-    SendInput ("{a down}")
-
-    Sleep (1700)
-
-    SendInput ("{a up}")
-
-    Sleep (500)
-
-    SendInput ("{s down}")
-
-    Sleep (3100)
-
-    SendInput ("{s up}")
-
+    if !MapWalk("a",1700)
+        return false
     Sleep(500)
-
-    SendInput("{a down}")
-
-    Sleep(900)
-
-    SendInput("{a up}")
-
+    if !MapWalk("s",3100)
+        return false
+    Sleep(500)
+    if !MapWalk("a",900)
+        return false
+    return true
 }
-
-
 
 MoveForSpiritWorld() {
-
-    SendInput ("{d down}")
-
-    SendInput ("{w down}")
-
-    Sleep(7000)
-
-    SendInput ("{d up}")
-
-    SendInput ("{w up}")
-
-    sleep(500)
-
-    Fixclick(400, 15, "Right")
-
-    sleep(4000)
-
+    if !MapWalk("dw",7000)
+        return false
+    Sleep(500)
+    if !MapMovementReady()
+        return false
+    FixClick(400,15,"Right")
+    Sleep(4000)
+    return true
 }
-
-
 
 MoveForAntKingdom() {
     ProcessLog("Ant Kingdom movement: A+S5000ms")
-    if !SummerWalk("as",5000)
+    if !MapWalk("as",5000)
         return false
     ProcessLog("Ant Kingdom movement: A+S released; wait500ms")
     Sleep(500)
     ProcessLog("Ant Kingdom movement: A+W6000ms")
-    if !SummerWalk("aw",6000)
+    if !MapWalk("aw",6000)
         return false
     ProcessLog("Ant Kingdom movement: A+W released; wait500ms")
     Sleep(500)
@@ -3931,219 +3944,110 @@ MoveForAntKingdom() {
     return true
 }
 
-
-
 MoveForMagicTown() {
-
-    SendInput("{d down}")
-
-    Sleep (2500)
-
-    SendInput("{d up}")
-
-    SendInput("{s down}")
-
-    Sleep (3000)
-
-    SendInput ("{d down}")
-
-    Sleep (3000)
-
-    SendInput ("{d up}")
-
-    SendInput ("{s up}")
-
+    if !MapWalk("d",2500)
+        return false
+    if !MapWalk("s",3000)
+        return false
+    if !MapWalk("sd",3000)
+        return false
+    return true
 }
-
-
 
 MoveForMagicHill() {
-
-    SendInput("{w down}")
-
-    Sleep(200)
-
-    SendInput("{w up}")
-
+    if !MapWalk("w",200)
+        return false
     Sleep(500)
-
-    SendInput("{w down}")
-
-    SendInput("{d down}")
-
-    Sleep(2000)
-
-    SendInput("{d up}")
-
-    SendInput("{w up}")
-
+    if !MapWalk("wd",2000)
+        return false
     Sleep(500)
-
-    SendInput("{w down}")
-
-    Sleep(9500)
-
-    SendInput("{w up}")
-
+    if !MapWalk("w",9500)
+        return false
     Sleep(600)
-
+    return true
 }
-
-
 
 MoveForHauntedAcademy() {
-
-    color := PixelGetColor(647, 187)
-
-    if (ok := FindText(&X, &Y, 620, 200, 750, 375, 0.15, 0.15, AcademyAngle2)) or (IsColorInRange(color, 0xFDF0B3)) {
-
-        SendInput ("{s down}")
-
-        sleep (3000)
-
-        SendInput ("{s up}")
-
-    } else {
-
-        SendInput ("{d down}")
-
-        sleep (3000)
-
-        SendInput ("{d up}")
-
-    }
-
+    color := PixelGetColor(647,187)
+    if FindText(&x,&y,620,200,750,375,0.15,0.15,AcademyAngle2) || IsColorInRange(color,0xFDF0B3)
+        return MapWalk("s",3000)
+    return MapWalk("d",3000)
 }
-
-
 
 MoveForSpaceCenter() {
-
-    SendInput("{d down}")
-
-    Sleep (4000)
-
-    SendInput("{d up}")
-
+    if !MapWalk("d",4000)
+        return false
     Sleep(500)
-
-    SendInput("{w down}")
-
-    Sleep(3000)
-
-    SendInput("{w up}")
-
+    if !MapWalk("w",3000)
+        return false
     Sleep(500)
-
+    return true
 }
-
-
 
 MoveForMountainTemple() {
     ProcessLog("Mountain Temple movement: A+S1200ms")
-    if !SummerWalk("as",1200)
+    if !MapWalk("as",1200)
         return false
     ProcessLog("Mountain Temple movement: A+S released; wait500ms")
     Sleep(500)
     ProcessLog("Mountain Temple movement: A1200ms")
-    if !SummerWalk("a",1200)
+    if !MapWalk("a",1200)
         return false
     ProcessLog("Mountain Temple movement complete; all movement keys released")
     return true
 }
 
-
-
 MoveForCursedFestival() {
-
-    SendInput ("{a down}")
-
-    sleep (1800)
-
-    SendInput ("{a up}")
-
+    if !MapWalk("a",1800)
+        return false
+    return true
 }
-
-
 
 MoveForNightmareTrain() {
-
-    SendInput ("{a down}")
-
-    sleep (1800)
-
-    SendInput ("{a up}")
-
+    if !MapWalk("a",1800)
+        return false
+    return true
 }
-
-
 
 MoveForAirCraft() {
-
-    SendInput ("{w down}")
-
-    sleep (800)
-
-    SendInput ("{w up}")
-
+    if !MapWalk("w",800)
+        return false
+    return true
 }
-
-
 
 MoveForHellish() {
-
-    Fixclick(600, 300, "Right")
-
-    Sleep (7000)
-
+    if !MapMovementReady()
+        return false
+    FixClick(600,300,"Right")
+    Sleep(7000)
+    return true
 }
-
-
 
 MoveForShibuya() {
-
-    if (ok := FindText(&X, &Y, 220, 190, 320, 250, 0.15, 0.15, ShibuyaAngle)) {
-
-        SendInput ("{a down}")
-
-        sleep (600)
-
-        SendInput ("{a up}")
-
-        sleep (500)
-
-        SendInput ("{a down}")
-
-        SendInput ("{w down}")
-
-        Sleep (1500)
-
-        SendInput ("{a up}")
-
-        SendInput ("{w up}")
-
-    } else {
-
-        SendInput ("{d down}")
-
-        Sleep(2000)
-
-        SendInput ("{d up}")
-
+    if FindText(&x,&y,220,190,320,250,0.15,0.15,ShibuyaAngle) {
+        if !MapWalk("a",600)
+            return false
+        Sleep(500)
+        return MapWalk("aw",1500)
     }
-
+    return MapWalk("d",2000)
 }
-
-
 
 RestartStage(knownMap := "") {
     global mode, PlacementPatternDropdown, SummerMapName, SummerMapInterrupted
+    global MansionMapName
     currentMap := mode="Summer Event" ? DetectMap(65000) : (knownMap != "" ? knownMap : DetectMap())
+    if mode = "Infinity Mansion"
+        MansionMapName := currentMap="no map found" || currentMap="không tìm thấy map" ? "" : currentMap
     if mode="Summer Event" && SummerMapInterrupted
         return false
     status := CheckLoaded()
     if (status = "lobby")
         return StartSelectedMode()
+    if status = "result"
+        return MonitorEndScreen()
+    if currentMap="no map found" || currentMap="không tìm thấy map"
+        ProcessLog("Map data unavailable: running setup and normal placement at spawn")
     if mode="Summer Event" {
         coverMap:=ParseSummerMapName(currentMap)
         BasicSetup()
@@ -4173,7 +4077,7 @@ RestartStage(knownMap := "") {
             ; positioned := PathNavigationPosition(currentMap)
             ; if positioned!="positioned"
             ;     return false
-            if !HandleMapMovement(currentMap) || !SummerMovementReady()
+            if !HandleMapMovement(currentMap) || !MapMovementReady()
                 return false
         } else if (currentMap != "không tìm thấy map" && currentMap != "no map found") {
             if !HandleMapMovement(currentMap)
@@ -4188,8 +4092,6 @@ RestartStage(knownMap := "") {
     }
 }
 
-
-
 Reconnect() {
 
     ; Check for Disconnected Screen using FindText
@@ -4199,11 +4101,7 @@ Reconnect() {
 
         ProcessLog("Disconnected - reconnecting to the private server...")
 
-
-
         psLink := FileExist("Settings\PrivateServer.txt") ? FileRead("Settings\PrivateServer.txt", "UTF-8") : ""
-
-
 
         ; Reconnect to Ps
 
@@ -4219,19 +4117,13 @@ Reconnect() {
 
         }
 
-
-
         Sleep(5000)
-
-
 
         loop {
 
             ProcessLog("Reconnecting to Roblox...")
 
             Sleep(15000)
-
-
 
             if WinExist(rblxID) {
 
@@ -4242,8 +4134,6 @@ Reconnect() {
                 Sleep(1000)
 
             }
-
-
 
             if (ok := FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText)) {
 
@@ -4262,8 +4152,6 @@ Reconnect() {
     }
 
 }
-
-
 
 PlaceUnit(x, y, slot := 1, physicalKey := false) {
     global rblxID, PlacementPatternDropdown, SmartPreviewReference
@@ -4362,19 +4250,25 @@ PlaceUnit(x, y, slot := 1, physicalKey := false) {
     }
 }
 
-
-
 MaxUpgrade() {
     Sleep 300
     if (ReadUnitUpgradeLevel() = 21)
         return true
     ; Nhan dien chu (MAX) tren header hoac nut Max xanh ben trai
-    if (FileExist("Images\MaxTag.png") && ImageSearch(&mX, &mY, 0, 150, 450, 500, "*50 Images\MaxTag.png"))
-        || (FileExist("Images\MaxButton.png") && ImageSearch(&mX, &mY, 0, 150, 450, 500, "*50 Images\MaxButton.png"))
-        || (ok := FindText(&X, &Y, 0, 150, 600, 500, 0.15, 0.15, MaxText))
-        || (ok := FindText(&X, &Y, 0, 150, 600, 500, 0.15, 0.15, MaxText2)) {
-        return true
+    static unavailable:=Map()
+    for image in ["Images\MaxTag.png","Images\MaxButton.png"] {
+        try {
+            if FileExist(image) && ImageSearch(&mX,&mY,0,150,450,500,"*50 " image)
+                return true
+        } catch {
+            if !unavailable.Has(image) {
+                ProcessLog("Max marker unavailable: " image "; continuing with text checks")
+                unavailable[image]:=true
+            }
+        }
     }
+    try return !!(FindText(&X,&Y,0,150,600,500,0.15,0.15,MaxText)
+        || FindText(&X,&Y,0,150,600,500,0.15,0.15,MaxText2))
     return false
 }
 
@@ -4426,8 +4320,6 @@ UnitPlaced(x := -1, y := -1, slot:=0, beforeCount:=-1) {
     }
     return interrupted ? "uncertain" : false
 }
-
-
 
 ; The upgrade panel's "Upgrade" button is a solid green block, but the old
 ; FindText patterns were captured from an older UI and no longer match anything.
@@ -4517,8 +4409,6 @@ EnsureSolidTemplate(name, rgb, w, h) {
 
 }
 
-
-
 ; The upgrade panel has two always-coloured controls: the green "Upgrade" button,
 ; which greys out when you cannot afford the upgrade, and the cyan "First" button,
 ; which keeps its colour. Matching either detects the panel in both money states.
@@ -4530,59 +4420,14 @@ EnsureUnitPanelTemplate() {
 
 }
 
-
-
 FindUnitPanel(&panelX := 0, &panelY := 0) {
-
-    global rblxID, mode, UnitPanelUsesNewUI := false
-
-    if !WinExist(rblxID)
-
+    global rblxID, UnitPanelUsesNewUI
+    UnitPanelUsesNewUI := false
+    if !WinActive(rblxID)
         return false
-
-    oldMode := A_CoordModePixel
-
-    CoordMode "Pixel", "Screen"
-
-    WinGetClientPos(&cx, &cy, , , rblxID)
-
-    if (mode = "Summer Event") {
-        CoordMode "Pixel", oldMode
-        return FindUpdatedUnitPanel(&panelX, &panelY)
-    }
-
-    ok := false
-
-    for tpl in EnsureUnitPanelTemplate() {
-
-        if (tpl = "")
-
-            continue
-
-        if ImageSearch(&sx, &sy, cx, cy + 80, cx + 800, cy + 515, "*40 " tpl) {
-
-            ok := true
-
-            break
-
-        }
-
-    }
-
-    CoordMode "Pixel", oldMode
-
-    if ok {
-
-        panelX := sx - cx
-
-        panelY := sy - cy
-
-        return true
-
-    }
-
+    ; Plain green/cyan blocks also occur in map scenery (observed: Navy Bay
+    ; water at310,93). Require the actual upgrade header and panel controls.
     return FindUpdatedUnitPanel(&panelX, &panelY)
-
 }
 
 FindUpdatedUnitPanel(&panelX := 0, &panelY := 0) {
@@ -4593,7 +4438,10 @@ FindUpdatedUnitPanel(&panelX := 0, &panelY := 0) {
     sx := cw / 800, sy := ch / 599
     try {
         text := OCR.FromRect(cx, cy + Round(160*sy), Round(305*sx), Round(285*sy), "en-US", 2).Text
-        hasControls := !!RegExMatch(text, "i)\bfirst\b|\bsell\b")
+        WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
+        if !WinActive(rblxID) || nx!=cx || ny!=cy || nw!=cw || nh!=ch
+            return false
+        hasControls := !!RegExMatch(text, "i)\bf[i1l]r[s5][t7]\b|\bs[e3][l1i]{2}\b")
         hasUpgrade := !!RegExMatch(text, "i)\b(?:upgrade|upg)\b")
         hasHeader := ParseUnitUpgradeLevel(text) >= 0
         ; The grey, unaffordable Upgrade button still has its header and controls.
@@ -4606,8 +4454,6 @@ FindUpdatedUnitPanel(&panelX := 0, &panelY := 0) {
     return false
 }
 
-
-
 CloseUnitPanel(force := false) {
     global rblxID
     if !WinActive(rblxID)
@@ -4619,15 +4465,13 @@ CloseUnitPanel(force := false) {
     CoordMode "Mouse", "Client"
     try {
         ; Clear arena space to the right of the hotbar in the supplied screenshots.
-        FixClick(Round(650 * cw / 800), Round(535 * ch / 599))
+        FixClick(Round(638 * cw / 800), Round(549 * ch / 599))
         Sleep(150)
     } finally {
         CoordMode "Mouse", oldMouseMode
     }
     return !FindUnitPanel(&panelX, &panelY)
 }
-
-
 
 MahogoraAbility() {
 
@@ -4648,8 +4492,6 @@ MahogoraAbility() {
     }
 
 }
-
-
 
 CheckAbility() {
 
@@ -4672,8 +4514,6 @@ CheckAbility() {
     }
 
 }
-
-
 
 CheckForXp() {
 
@@ -4699,8 +4539,6 @@ CheckForXp() {
     return false
 
 }
-
-
 
 ParseUnitUpgradeLevel(text) {
     if RegExMatch(Trim(text), "i)^upg\s*\[\s*\d{1,2}\s*\]\s*\(\s*max\s*\)$")
@@ -4763,30 +4601,26 @@ ApplyUnitUpgradeLimit(limit, slot, readLevel := 0, pressUpgrade := 0) {
         readLevel := ReadUnitUpgradeLevel
     if !pressUpgrade
         pressUpgrade := PressUnitUpgrade
-    Loop 3 {
-        if ServiceSummerCards()
-            return false
-        current := readLevel()
-        if (current < 0) {
-            ProcessLog("Slot " slot ": could not read Upgrade [n]; skipping unverified upgrade")
-            return false
-        }
-        if (current >= limit)
-            return "limit"
-        if (pressUpgrade() = false)
-            return false
-        Sleep(200)
-        if ServiceSummerCards()
-            return false
-        confirmed := readLevel()
-        if (confirmed < 0 || confirmed <= current) {
-            ProcessLog("Slot " slot ": upgrade increment not confirmed; stopping this upgrade pass")
-            return false
-        }
-        if (confirmed >= limit)
-            return "limit"
+    if ServiceSummerCards()
+        return false
+    current := readLevel()
+    if (current < 0) {
+        ProcessLog("Slot " slot ": could not read Upgrade [n]; skipping unverified upgrade")
+        return false
     }
-    return true
+    if (current >= limit)
+        return "limit"
+    if (pressUpgrade() = false)
+        return false
+    Sleep(200)
+    if ServiceSummerCards()
+        return false
+    confirmed := readLevel()
+    if (confirmed < 0 || confirmed <= current) {
+        ProcessLog("Slot " slot ": upgrade increment not confirmed; stopping this upgrade pass")
+        return false
+    }
+    return confirmed >= limit ? "limit" : true
 }
 
 UpgradeUnit(x, y, slot := 0) {
@@ -4796,14 +4630,18 @@ UpgradeUnit(x, y, slot := 0) {
         return false
     oldMouseMode := A_CoordModeMouse
     CoordMode "Mouse", "Client"
+    result := false, closed := false
     try {
-        ; Select the recorded unit only. Never probe neighbouring terrain.
+        SendEvent("q")
+        ; Clear the previous panel before selecting a unit underneath its area.
+        if !UnitActionAllowed() || !CloseUnitPanel()
+            return false
         FixClick(x, y)
         opened := false
         loop 4 {
             Sleep(200)
             if ServiceSummerCards() {
-                if !UnitActionAllowed()
+                if !UnitActionAllowed() || !CloseUnitPanel()
                     return false
                 FixClick(x, y)
                 continue
@@ -4817,20 +4655,27 @@ UpgradeUnit(x, y, slot := 0) {
             ProcessLog("Upgrade panel not found at " x "," y "; waiting for another pass without offset clicks")
             return false
         }
-        limit := GetUnitUpgradeLimit(slot)
-        ; OFF means no numerical cap: a readable [n] is not required to press R.
-        if (limit <= 0)
-            return PressUnitUpgrade()
-        ; A pass without an observed level increment is treated as waiting for funds.
-        ; Do not run the caller's ability clicks after that failed pass.
-        result := ApplyUnitUpgradeLimit(limit > 0 ? limit : 21, slot)
-        return (limit <= 0 && result = "limit") ? "max" : result
+        if MaxUpgrade() {
+            result := "max"
+        } else {
+            limit := GetUnitUpgradeLimit(slot)
+            ; One R press per visit, including when a numerical cap is set.
+            result := limit<=0 ? PressUnitUpgrade() : ApplyUnitUpgradeLimit(limit, slot)
+            if result!=false && UnitActionAllowed() {
+                CheckAbility()
+                MahogoraAbility()
+            }
+        }
     } finally {
-        CoordMode "Mouse", oldMouseMode
+        try {
+            if UnitActionAllowed()
+                closed := CloseUnitPanel()
+        } finally {
+            CoordMode "Mouse", oldMouseMode
+        }
     }
+    return closed ? result : false
 }
-
-
 
 CheckLobby() {
 
@@ -4855,10 +4700,8 @@ CheckLobby() {
 
 }
 
-
-
 FindVoteStart(&x, &y) {
-    global rblxID, VoteStart, SummerVoteStart, mode
+    global rblxID, VoteStart, SummerVoteStart, MansionVoteStart, mode
     if !WinActive(rblxID)
         return false
     WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
@@ -4868,6 +4711,15 @@ FindVoteStart(&x, &y) {
         if !FindText(&x, &y, cx + Round(300*sx), cy + Round(30*sy), cx + Round(505*sx), cy + Round(85*sy), 0, 0, SummerVoteStart, 1, 0, 0, 20, 10, 1, sx, sy)
             return false
         ; Title center -> center of Yes, measured on the supplied screenshot.
+        x -= Round(47*sx)
+        y += Round(51*sy)
+        return true
+    }
+    if (mode = "Infinity Mansion") {
+        sx := cw / 800, sy := ch / 599
+        if !FindText(&x, &y, cx + Round(300*sx), cy + Round(30*sy), cx + Round(505*sx), cy + Round(85*sy), 0, 0, MansionVoteStart, 1, 0, 0, 20, 10, 1, sx, sy)
+            return false
+        ; Title -> Yes measured on the Mansion vote screen, not its room queue.
         x -= Round(47*sx)
         y += Round(51*sy)
         return true
@@ -4901,16 +4753,46 @@ SummerMatchStarted() {
     return false
 }
 
+RegularMatchHudVisible() {
+    global rblxID, mode
+    if mode="Summer Event" || !WinActive(rblxID)
+        return false
+    try {
+        WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+        oldPixelMode := A_CoordModePixel
+        CoordMode "Pixel","Screen"
+        try {
+            if !PixelSearch(&x,&y,cx+Round(cw*150/800),cy+Round(ch*54/599),
+                cx+Round(cw*650/800),cy+Round(ch*72/599),0x00FF00,30)
+                return false
+        } finally {
+            CoordMode "Pixel",oldPixelMode
+        }
+        cash := OCR.FromRect(cx+Round(cw*300/800),cy+Round(ch*480/599),
+            Round(cw*210/800),Round(ch*32/599),"en-US",2).Text
+        if !RegExMatch(cash,"i)^\s*\d[\d,.\s]*[kmb]?\s*[¥y%]?\s*$")
+            return false
+        WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
+        return WinActive(rblxID) && nx=cx && ny=cy && nw=cw && nh=ch && !ResultScreenReady()
+    }
+    return false
+}
+
 CheckLoaded() {
 
     loop {
 
         Sleep(1000)
 
-
+        if ResultScreenReady()
+            return "result"
 
         if SummerMatchStarted() {
             ProcessLog("Summer Event: active match HUD detected; match loaded")
+            return "loaded"
+        }
+        if RegularMatchHudVisible() {
+            ProcessLog("Regular match HUD confirmed; match loaded")
             return "loaded"
         }
 
@@ -4942,8 +4824,6 @@ CheckLoaded() {
 
 }
 
-
-
 StartedGame() {
     global mode, MatchMaking, SummerMinimumPlayers
     lowCount := 0, lowReads := 0
@@ -4952,12 +4832,22 @@ StartedGame() {
         global stageStartTime := A_TickCount
         return true
     }
+    if !FindVoteStart(&X,&Y) && RegularMatchHudVisible() {
+        ProcessLog("Regular match already running; proceeding to placement")
+        stageStartTime := A_TickCount
+        return true
+    }
     ProcessLog("Waiting for teleport and Vote Start...")
     voted := false, unknownLogged := false
     waitStart := A_TickCount
 
     loop {
         Sleep(1000)
+
+        if ResultScreenReady() {
+            ProcessLog("Vote Start interrupted by result screen; stopping placement setup")
+            return false
+        }
 
         if SummerMatchStarted() {
             ProcessLog("Summer Event: active match HUD detected while waiting for Vote Start")
@@ -5001,6 +4891,11 @@ StartedGame() {
             continue
         }
 
+        if !voted && RegularMatchHudVisible() {
+            ProcessLog("Regular match HUD confirmed without pending Vote Start")
+            break
+        }
+
         if (voted) {
             Sleep(2500)
             break
@@ -5012,8 +4907,6 @@ StartedGame() {
     global stageStartTime := A_TickCount
     return true
 }
-
-
 
 PlacementCamera() {
 
@@ -5034,8 +4927,6 @@ PlacementCamera() {
         WinActivate(rblxID)
 
     Sleep(200)
-
-
 
     oldMouseMode := A_CoordModeMouse
 
@@ -5082,8 +4973,6 @@ PlacementCamera() {
 
 }
 
-
-
 StartSelectedMode() {
 
     ; Do not click arbitrary points in the 3D viewport before navigating.
@@ -5102,6 +4991,10 @@ StartSelectedMode() {
 
         StoryMode()
 
+    }
+
+    else if (ModeDropdown.Text = "Infinity Mansion") {
+        InfinityMansionMode()
     }
 
     else if (ModeDropdown.Text = "Summer Event") {
@@ -5132,7 +5025,6 @@ StartSelectedMode() {
 
     }
 
-
     else if (ModeDropdown.Text = "Dungeon") {
 
         DungeonMode()
@@ -5159,8 +5051,6 @@ StartSelectedMode() {
 
 }
 
-
-
 FormatStageTime(ms) {
 
     seconds := Floor(ms / 1000)
@@ -5169,19 +5059,13 @@ FormatStageTime(ms) {
 
     hours := Floor(minutes / 60)
 
-
-
     minutes := Mod(minutes, 60)
 
     seconds := Mod(seconds, 60)
 
-
-
     return Format("{:02}:{:02}:{:02}", hours, minutes, seconds)
 
 }
-
-
 
 ValidateMode() {
 
@@ -5217,8 +5101,6 @@ ValidateMode() {
 
 }
 
-
-
 GetNavKeys() {
 
     return StrSplit(FileExist("Settings\UINavigation.txt") ? FileRead("Settings\UINavigation.txt", "UTF-8") : "\,#,}",
@@ -5227,23 +5109,17 @@ GetNavKeys() {
 
 }
 
-
-
 GenerateRandomPoints() {
 
     points := []
 
     gridSize := 40  ; Minimum spacing between units
 
-
-
     ; Center point coordinates
 
     centerX := 408
 
     centerY := 320
-
-
 
     ; Define placement area boundaries (adjust these as needed)
 
@@ -5255,8 +5131,6 @@ GenerateRandomPoints() {
 
     maxY := centerY + 140  ; Bottom boundary
 
-
-
     ; Generate 40 random points
 
     loop 40 {
@@ -5266,8 +5140,6 @@ GenerateRandomPoints() {
         x := Random(minX, maxX)
 
         y := Random(minY, maxY)
-
-
 
         ; Check if point is too close to existing points
 
@@ -5289,8 +5161,6 @@ GenerateRandomPoints() {
 
         }
 
-
-
         ; If point is not too close to others, add it
 
         if (!tooClose)
@@ -5298,8 +5168,6 @@ GenerateRandomPoints() {
             points.Push({ x: x, y: y })
 
     }
-
-
 
     ; Always add center point last (so it's used last)
 
@@ -5309,8 +5177,6 @@ GenerateRandomPoints() {
 
 }
 
-
-
 GenerateGridPoints() {
 
     points := []
@@ -5319,23 +5185,17 @@ GenerateGridPoints() {
 
     squaresPerSide := 10  ; How many points per row/column (odd number recommended)
 
-
-
     ; Center point coordinates
 
     centerX := 408
 
     centerY := 320
 
-
-
     ; Calculate starting position for top-left point of the grid
 
     startX := centerX - ((squaresPerSide - 1) / 2 * gridSize)
 
     startY := centerY - ((squaresPerSide - 1) / 2 * gridSize)
-
-
 
     ; Generate grid points row by row
 
@@ -5344,8 +5204,6 @@ GenerateGridPoints() {
         currentRow := A_Index
 
         y := startY + ((currentRow - 1) * gridSize)
-
-
 
         ; Generate each point in the current row
 
@@ -5359,21 +5217,15 @@ GenerateGridPoints() {
 
     }
 
-
-
     return points
 
 }
-
-
 
 ; circle coordinates
 
 GenerateCirclePoints() {
 
     points := []
-
-
 
     ; A fixed set of 8 angles per ring is what left the growing holes: on the
 
@@ -5389,8 +5241,6 @@ GenerateCirclePoints() {
 
     maxRadius := 180
 
-
-
     ring := 1
 
     radius := ringGap
@@ -5399,15 +5249,11 @@ GenerateCirclePoints() {
 
         count := Max(6, Round(2 * 3.14159 * radius / arcGap))
 
-
-
         ; Offset every other ring by half a step so the points interleave
 
         ; instead of lining up into radial spokes.
 
         phase := (Mod(ring, 2) = 0) ? 3.14159 / count : 0
-
-
 
         loop count {
 
@@ -5421,15 +5267,11 @@ GenerateCirclePoints() {
 
         }
 
-
-
         radius += ringGap
 
         ring++
 
     }
-
-
 
     ; Centre goes last: the avatar stands there, so it is the least reliable
 
@@ -5440,8 +5282,6 @@ GenerateCirclePoints() {
     return points
 
 }
-
-
 
 CheckEndAndRoute() {
 
@@ -5463,8 +5303,6 @@ CheckEndAndRoute() {
     }
 
 }
-
-
 
 ClickUntilGone(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0, offsetY := 0, textToFind2 := "") {
 
@@ -5488,15 +5326,11 @@ ClickUntilGone(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX
 
 }
 
-
-
 ClickOnce(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0, offsetY := 0, textToFind2 := "") {
 
     if (ok := FindText(&X, &Y, searchX1, searchY1, searchX2, searchY2, 0.15, 0.15, textToFind) ||
 
     textToFind2 && FindText(&X, &Y, searchX1, searchY1, searchX2, searchY2, 0.15, 0.15, textToFind2)) {
-
-
 
         if (offsetX != 0 || offsetY != 0) {
 
@@ -5512,8 +5346,6 @@ ClickOnce(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0
 
 }
 
-
-
 StartMacro(*) {
     ProcessLog("F2: starting macro...")
     try {
@@ -5525,8 +5357,6 @@ StartMacro(*) {
         ProcessLog("StartMacro ERROR: " . err.Message . " @ line " . err.Line)
     }
 }
-
-
 
 ; The settings toggle pill is green (#00F058) when on and dark red (#640000)
 ; when off. The knob covers whichever half is not the pill colour, so sample
@@ -5579,8 +5409,6 @@ IsUpgradeUIToggleOn(x, y) {
 
 }
 
-
-
 EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
     global rblxID, aaMainUIHwnd, ShowUpgradeUIOnLeftImg
@@ -5592,8 +5420,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
         return false
 
     }
-
-
 
     if (IsSet(aaMainUIHwnd) && aaMainUIHwnd && WinExist("ahk_id " aaMainUIHwnd))
 
@@ -5625,8 +5451,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         }
 
-
-
         ; The panel reopens at whatever position it was last scrolled to, so
         ; start from a known baseline instead of guessing a wheel count. Fewer
         ; events with longer gaps keep the input queue from backing up and
@@ -5646,15 +5470,11 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         Sleep(1200)
 
-
-
         ; Client-mode ImageSearch also resolves against the active window.
 
         WinActivate(rblxID)
 
         Sleep(200)
-
-
 
         targetImg := IsSet(ShowUpgradeUIOnLeftImg) ? ShowUpgradeUIOnLeftImg : "Images\ShowUpgradeUIOnLeft_Text.png"
 
@@ -5665,8 +5485,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
             return false
 
         }
-
-
 
         ; Walk down one notch at a time. Only accept a position that is still
         ; there a moment later: the list keeps gliding after the last wheel, so
@@ -5708,8 +5526,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         }
 
-
-
         if !found {
 
             ; This step only tunes the UI. Aborting the whole match because the
@@ -5721,15 +5537,11 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         }
 
-
-
         ; Toggle sits to the right of the label block, 27px below its top edge.
 
         toggleX := foundX + 287
 
         toggleY := foundY + 27
-
-
 
         if IsUpgradeUIToggleOn(toggleX, toggleY) {
 
@@ -5739,15 +5551,11 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         }
 
-
-
         WinActivate(rblxID)
 
         Sleep(150)
 
         FixClick(toggleX, toggleY)
-
-
 
         ; The pill slides over a few hundred ms, so poll instead of judging the
         ; state once right after the click. Re-locate the row every time in case
@@ -5777,8 +5585,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         }
 
-
-
         if enabled {
 
             ProcessLog("Enabled Show Upgrade UI on left")
@@ -5786,8 +5592,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
             return true
 
         }
-
-
 
         ProcessLog("Clicked Show Upgrade UI on left but could not verify it - skipping")
 
@@ -5809,8 +5613,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 
         WinActivate(rblxID)
 
-
-
         ; Put the macro window back on top so its title bar is what the user
         ; sees above the game.
 
@@ -5821,8 +5623,6 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
     }
 
 }
-
-
 
 TogglePause(*) {
 
@@ -5844,8 +5644,6 @@ TogglePause(*) {
 
 }
 
-
-
 IsColorInRange(color, targetColor, tolerance := 50) {
 
     ; Extract RGB components
@@ -5856,8 +5654,6 @@ IsColorInRange(color, targetColor, tolerance := 50) {
 
     b1 := color & 0xFF
 
-
-
     ; Extract target RGB components
 
     r2 := (targetColor >> 16) & 0xFF
@@ -5865,8 +5661,6 @@ IsColorInRange(color, targetColor, tolerance := 50) {
     g2 := (targetColor >> 8) & 0xFF
 
     b2 := targetColor & 0xFF
-
-
 
     ; Check if within tolerance range
 
@@ -5878,25 +5672,17 @@ IsColorInRange(color, targetColor, tolerance := 50) {
 
 }
 
-
-
 ; Custom monitor for dungeon ending
 
 MonitorDungeonEnd() {
 
     global mode, Wins, loss
 
-
-
     loop {
 
         Sleep(3000)
 
-
-
         FixClick(560, 560)  ; Move click
-
-
 
         ; Check for unit exit UI element
 
@@ -5906,39 +5692,22 @@ MonitorDungeonEnd() {
 
         }
 
-
-
-        ; Check for next text UI element
-
-        if (ok := FindText(&X, &Y, 260, 400, 390, 450, 0, 0, NextText)) {
-
-            ClickUntilGone(0, 0, 260, 400, 390, 450, NextText, 0, -40)
-
-        }
-
-
+        ; Dungeon keeps its own routing after the common reward skip.
+        SkipResultRewards()
 
         ; Check for returning to lobby
 
-        if (ok := FindText(&X, &Y, 80, 85, 739, 224, 0.20, 0.20, LobbyText) or
-
-        (ok := FindText(&X, &Y, 80, 85, 739, 224, 0.20, 0.20, LobbyText2))) {
+        if TryResultAction(&action) {
+            if action="next"
+                continue
+            if action!="replay"
+                return ContinueAfterResult(action)
 
             ProcessLog("Dungeon complete; replaying")
-
-
-
-            ; Click replay button
-
-            ClickReplay()
-
-
 
             ; After clicking replay, check for shop/shrine/chest
 
             CheckDungeonSpecials()
-
-
 
             if (CheckForFinishDungeon()) {
 
@@ -5947,8 +5716,6 @@ MonitorDungeonEnd() {
                 return
 
             }
-
-
 
             ; Start a new dungeon run
 
@@ -5964,21 +5731,15 @@ MonitorDungeonEnd() {
 
 }
 
-
-
 ; Function to check for special dungeon elements after replay
 
 CheckDungeonSpecials() {
 
     ProcessLog("Checking dungeon shop, shrine, and chest options")
 
-
-
     ; Give time for special elements to appear
 
     Sleep(2000)
-
-
 
     ; Check the area for shop, shrine, or chest
 
@@ -6026,21 +5787,15 @@ CheckDungeonSpecials() {
 
         }
 
-
-
         Sleep(1000)  ; Wait and check again
 
     }
-
-
 
     ProcessLog("No shop, shrine, or Open Chest option found")
 
     return false
 
 }
-
-
 
 SelectDungeonRoute() {
 
@@ -6094,8 +5849,6 @@ SelectDungeonRoute() {
 
     }
 
-
-
     ; Look for Enter button and click until gone
 
     if (ok := FindText(&X, &Y, 120, 425, 680, 500, 0.20, 0.20, Enter)) {
@@ -6105,8 +5858,6 @@ SelectDungeonRoute() {
         ClickUntilGone(0, 0, 120, 425, 680, 500, Enter, 0, -30)
 
         Sleep(2000)
-
-
 
         ; Start dungeon run
 
@@ -6118,21 +5869,15 @@ SelectDungeonRoute() {
 
 }
 
-
-
 HandleShop() {
 
     Sleep(1000)
 
     ProcessLog("Buying in shop")
 
-
-
     ; Give the shop time to fully load
 
     Sleep(1000)
-
-
 
     ; Buy item in slot 3 (bottom)
 
@@ -6140,23 +5885,17 @@ HandleShop() {
 
     Sleep(1000)
 
-
-
     ; Buy item in slot 2 (middle)
 
     FixClick(560, 280)
 
     Sleep(1000)
 
-
-
     ; Buy item in slot 1 (top)
 
     FixClick(560, 225)
 
     Sleep(1000)
-
-
 
     ; Click continue to close the shop
 
@@ -6170,31 +5909,21 @@ HandleShop() {
 
 }
 
-
-
 HandleChestScreen() {
 
     global BossRoomCompleted, SaveChestsForBoss
-
-
 
     ; Determine if we should open chests now
 
     shouldOpenChests := BossRoomCompleted || !SaveChestsForBoss
 
-
-
     if (shouldOpenChests) {
 
         ProcessLog("Opening available chests")
 
-
-
         ; Process first chest position - keep clicking until exhausted
 
         firstChestExhausted := false
-
-
 
         while (!firstChestExhausted) {
 
@@ -6203,8 +5932,6 @@ HandleChestScreen() {
             ClickOnce(0, 0, 535, 265, 605, 315, OpenChest, -3, -35)
 
             Sleep(2000)
-
-
 
             ; Check if we're still on the chest screen
 
@@ -6220,13 +5947,9 @@ HandleChestScreen() {
 
         }
 
-
-
         ; Process second chest position - keep clicking until exhausted
 
         secondChestExhausted := false
-
-
 
         while (!secondChestExhausted) {
 
@@ -6235,8 +5958,6 @@ HandleChestScreen() {
             ClickOnce(0, 0, 530, 330, 605, 375, OpenChest, -3, -35)
 
             Sleep(1000)
-
-
 
             ; Check if we're still on the chest screen
 
@@ -6252,11 +5973,7 @@ HandleChestScreen() {
 
         }
 
-
-
         ProcessLog("All chests opened")
-
-
 
         ; Reset the boss room flag if it was set
 
@@ -6286,15 +6003,11 @@ HandleChestScreen() {
 
 }
 
-
-
 ClaimChestReward() {
 
     maxClicks := 30  ; Safety limit
 
     clicks := 0
-
-
 
     while (clicks < maxClicks) {
 
@@ -6304,8 +6017,6 @@ ClaimChestReward() {
 
         Sleep(500)
 
-
-
         ; Check if chest screen has returned
 
         if (IsChestScreenVisible()) {
@@ -6314,13 +6025,9 @@ ClaimChestReward() {
 
         }
 
-
-
         clicks++
 
     }
-
-
 
     ProcessLog("All rewards collected")
 
@@ -6328,15 +6035,11 @@ ClaimChestReward() {
 
 }
 
-
-
 IsChestScreenVisible() {
 
     return FindText(&X, &Y, 140, 200, 375, 250, 0, 0, ChestRoom)
 
 }
-
-
 
 CheckForFinishDungeon() {
 
@@ -6346,15 +6049,11 @@ CheckForFinishDungeon() {
 
         0.20, 0.20, EnterDungeon))) {
 
-
-
         ; Click the Finish button
 
         ClickUntilGone(0, 0, 240, 180, 565, 480, DungeonFinish, -3, -35)
 
         Sleep(1500)
-
-
 
         ; Click the X in the top right
 
@@ -6362,23 +6061,17 @@ CheckForFinishDungeon() {
 
         Sleep(1000)
 
-
-
         ; Return to lobby
 
         ProcessLog("Returning to lobby after completing Dungeon")
 
         ClickReturnToLobby()
 
-
-
         ; Check for lobby and restart
 
         return CheckLobby()
 
     }
-
-
 
     return false
 
