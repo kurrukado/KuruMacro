@@ -1,5 +1,8 @@
 ; Isolated local Paddle bridge. Only the card-board ROI crosses this interface.
 StartPaddleWorker() {
+    global CARD_PADDLE_ENABLED
+    if !CARD_PADDLE_ENABLED
+        return false
     state := PaddleStartupState()
     if IsObject(state.request) || (state.alive && A_TickCount - state.checked < 1500)
         return state.alive
@@ -138,7 +141,9 @@ PaddleCaptureBoard() {
 }
 
 PaddleReadCardNames(budgetMs, onlySlot := 0) {
-    global rblxID, CARD_READ_CONFLICTS
+    global rblxID, CARD_READ_CONFLICTS, CARD_PADDLE_ENABLED
+    if !CARD_PADDLE_ENABLED
+        return 0 ; ReadCardNames uses the Windows OCR path.
     static sequence := 0, lastUnavailable := 0, readyUntil := 0
     if !WinActive(rblxID) || !CardScreenVisible(true) || budgetMs < 100
         return ["", "", ""]

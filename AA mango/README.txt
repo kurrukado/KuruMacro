@@ -10,8 +10,7 @@ Lib\GUI.ahk - for GUI and interact
 There's also libraries files for macro function
 
 Personal settings
-Start Main.ahk with AutoHotkey v2. Save your own credentials through the JEV
-and Discord panels, or copy the matching Settings\*.example.txt to its .txt
+Start Main.ahk with AutoHotkey v2. Save Discord settings through the Discord panel, or copy the matching Settings\*.example.txt to its .txt
 name and edit that local copy. See Settings\README.example.md.
 
 Paddle card OCR (optional, Windows x64)

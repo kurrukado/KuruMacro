@@ -60,7 +60,7 @@ PlacementSlotOrder(smart) {
 
 PlacingUnits() {
 
-    global successfulCoordinates, UnitPlacements, SmartPlacementColor
+    global successfulCoordinates, UnitPlacements, SmartPlacementColor, mode, rblxID
 
     smart := PlacementPatternDropdown.Text = "Smart"
     if smart
@@ -71,16 +71,13 @@ PlacingUnits() {
     successfulCoordinates := []
 
     placedCounts := Map()
+    slotSearch := Map()
+    placementGeometry := smart ? SmartPlacementGeometry() : ""
 
     requestedTotal := 0
-
-    ; A point that failed once stays blocked for the rest of the run: it is
-
-    ; usually occupied or off the path, and clicking it again selects the unit
-
-    ; already standing there, which looks like a successful new placement.
-
-    failedCoordinates := []
+    nextPlacementUpgrade := A_TickCount + 15000
+    nextPlacementService := 0
+    placementUpgradeCursor := 0
 
     anyEnabled := false
 
@@ -119,7 +116,8 @@ PlacingUnits() {
     ; Farm first, then configured non-Farm slots in numerical order.
     slotOrder := PlacementSlotOrder(smart)
 
-    for slotNum in slotOrder {
+    while slotOrder.Length {
+        slotNum := slotOrder.RemoveAt(1)
 
         enabled := "enabled" slotNum
 
@@ -145,15 +143,22 @@ PlacingUnits() {
 
         if (enabled && placements > 0) {
 
-            requestedTotal += placements
-
-            ProcessLog("Placing Unit: " slotNum " (0/" placements ")")
+            firstVisit := !slotSearch.Has(slotNum)
+            if firstVisit {
+                requestedTotal += placements
+                ProcessLog("Placing Unit: " slotNum " (0/" placements ")")
+            }
 
             targetPoints := []
+            failedPoints := []
 
             usingCustom := false
 
-            if (!smart && IsSet(UnitPlacements) && UnitPlacements.Has(slotNum) && UnitPlacements[slotNum].Length > 0) {
+            if smart && !firstVisit {
+                search := slotSearch[slotNum]
+                targetPoints := search.points
+                failedPoints := search.failed
+            } else if (!smart && IsSet(UnitPlacements) && UnitPlacements.Has(slotNum) && UnitPlacements[slotNum].Length > 0) {
 
                 usingCustom := true
 
@@ -168,9 +173,8 @@ PlacingUnits() {
             } else {
 
                 if smart {
-                    unitType := GetUnitPlacementType(slotNum)
-                    targetPoints := GenerateSmartPoints()
-                    ProcessLog("Smart: slot " slotNum ", type=" unitType ", pattern=Random with blue-border priority")
+                    targetPoints := GenerateSmartPoints(&placementScale, slotNum)
+                    ProcessLog("Smart: slot " slotNum ", type=" GetUnitPlacementType(slotNum) ", search=random near player feet")
                 } else {
                     ProcessLog("Unit " slotNum ": Using " PlacementPatternDropdown.Text " pattern")
                     targetPoints := defaultPoints
@@ -185,9 +189,60 @@ PlacingUnits() {
 
             stopThisSlot := false
             unreadableStreak := 0
-            previewDeferred := []
+            batchSkipped := []
+            if smart {
+                if firstVisit {
+                    search := {points: targetPoints, failed: failedPoints, skipped: [], next: 1, batches: 1, unreadable: 0, nextLog: 0, hillVersion: SmartHillRegionVersion(slotNum)}
+                    slotSearch[slotNum] := search
+                }
+                batchSkipped := search.skipped
+                unreadableStreak := search.unreadable
+                searchBatches := search.batches
+            }
+            failedAttempts := 0
+            turnStarted := A_TickCount
+            yieldSlot := false
 
             while (placedCounts[slotNum] < placements) {
+
+                if smart && SmartHillRegionVersion(slotNum) != search.hillVersion {
+                    targetPoints := GenerateSmartPoints(&placementScale, slotNum)
+                    search.points := targetPoints, search.next := 1
+                    search.hillVersion := SmartHillRegionVersion(slotNum)
+                }
+
+                if smart && targetPoints.Length = 0
+                    break ; The client arena is unavailable; do not spin regenerating points.
+
+                if smart {
+                    if !WinActive(rblxID) {
+                        Sleep(100)
+                        yieldSlot := true
+                        break
+                    }
+                    ServiceSummerCards()
+                    if SmartPreviewInterrupted(true) {
+                        Sleep(100)
+                        yieldSlot := true
+                        break
+                    }
+                    ; Even when every point is skipped, service the match and upgrades.
+                    ; PlaceUnit retains its fresh pre-input result/card/focus checks.
+                    if A_TickCount >= nextPlacementService {
+                        if CheckForXp()
+                            return MonitorStage()
+                        Wave40Reached()
+                        Reconnect()
+                        CheckEndAndRoute()
+                        nextPlacementService := A_TickCount + 1000
+                    }
+                    geometry := SmartPlacementGeometry()
+                    if geometry = "" || geometry != placementGeometry {
+                        ProcessLog("Smart: client geometry changed; ending placement before reusing screen coordinates")
+                        successfulCoordinates := []
+                        return false
+                    }
+                }
 
                 loopSafety++
 
@@ -201,32 +256,35 @@ PlacingUnits() {
 
                 hadUntestedPoint := false
 
-                for point in targetPoints {
+                for pointIndex, point in targetPoints {
+
+                    if smart {
+                        if pointIndex < search.next
+                            continue
+                        geometry := SmartPlacementGeometry()
+                        if geometry = "" || geometry != placementGeometry {
+                            ProcessLog("Smart: client geometry changed; ending placement before reusing screen coordinates")
+                            successfulCoordinates := []
+                            return false
+                        }
+                        if failedAttempts >= 4 || A_TickCount - turnStarted >= 6000 {
+                            yieldSlot := true
+                            break
+                        }
+                        search.next := pointIndex + 1
+                    }
 
                     ; Skip if this coordinate was already used successfully
 
-                    alreadyUsed := PlacementPointUsed(successfulCoordinates,point)
-                        || (smart && PlacementPointUsed(previewDeferred,point))
+                    alreadyUsed := smart
+                        ? SmartPlacementTooClose(successfulCoordinates, point, placementScale) || SmartRecentPoint(batchSkipped, point, placementScale)
+                        : PlacementPointUsed(successfulCoordinates, point)
 
                     if (alreadyUsed)
 
                         continue
 
-                    alreadyFailed := false
-
-                    for failedPoint in failedCoordinates {
-
-                        if (failedPoint.slot = slotNum && (!smart || failedPoint.terrain = SmartTerrainForSlot(slotNum)) && Abs(failedPoint.x - point.x) < 2 && Abs(failedPoint.y - point.y) < 2) {
-
-                            alreadyFailed := true
-
-                            break
-
-                        }
-
-                    }
-
-                    if (alreadyFailed)
+                    if (smart ? SmartRecentPoint(failedPoints, point, placementScale) : PlacementPointUsed(failedPoints, point))
 
                         continue
 
@@ -234,13 +292,16 @@ PlacingUnits() {
 
                     placementResult := smart ? PlaceUnit(point.x, point.y, slotNum, unreadableStreak > 0)
                         : PlaceUnit(point.x, point.y, slotNum)
+                    if smart
+                        failedAttempts++
                     if smart && placementResult="unreadable-point" {
                         unreadableStreak:=0
-                        previewDeferred.Push({x:point.x,y:point.y})
+                        SmartRememberPoint(batchSkipped, point, true)
                         ProcessLog("Smart: slot " slotNum " ghost confirmed but point unreadable; trying another candidate")
                         continue
                     }
                     if smart && placementResult = "unreadable" {
+                        search.next := pointIndex
                         unreadableStreak++
                         if unreadableStreak >= 3 {
                             ProcessLog("Smart: slot " slotNum " preview could not be verified after 3 selections; stopping slot without marking terrain invalid")
@@ -251,19 +312,19 @@ PlacingUnits() {
                     }
                     unreadableStreak := 0
                     if (placementResult = "uncertain") {
-                        ProcessLog("Placement interrupted after a click; stopping slot " slotNum " to avoid an unverified duplicate")
+                        ProcessLog("Placement interrupted after a click; leaving slot " slotNum " pending to avoid an unverified duplicate")
                         stopThisSlot := true
                         break
                     }
                     if (placementResult = "interrupted") {
-                        previewDeferred:=[]
+                        if ((smart || mode = "Summer Event") && WinActive(rblxID) && ResultScreenReady())
+                            return false ; RestartStage hands off to MonitorStage.
+                        if smart {
+                            search.next := pointIndex
+                            yieldSlot := true
+                        } else
+                            batchSkipped := []
                         break ; reselect this slot after the Summer card offer closes
-                    }
-                    if (placementResult = "deferred") {
-                        previewDeferred:=[]
-                        ProcessLog("Smart: unit " slotNum " needs more money; terrain failure counter unchanged")
-                        Sleep(500)
-                        break
                     }
                     if (placementResult = true) {
                         if smart
@@ -272,47 +333,40 @@ PlacingUnits() {
                         successfulCoordinates.Push({ x: point.x, y: point.y, slot: slotNum })
 
                         placedCounts[slotNum] += 1
-
+                        nextPlacementUpgrade := A_TickCount + 15000
                         ProcessLog("Placed Unit: " slotNum " (" placedCounts[slotNum] "/" placements ")")
 
-                        Sleep(500)
-
-                        CloseUnitPanel()
+                        if smart {
+                            failedAttempts := 0
+                            turnStarted := A_TickCount
+                        } else {
+                            Sleep(500)
+                            CloseUnitPanel()
+                        }
 
                         break
 
                     }
 
-                    ; Verification now polls the panel for ~1.5 s, so a miss is a
-
-                    ; real miss. Retry single-count slots too instead of leaving
-
-                    ; the unit unplaced while the run still reports success.
-
-                    ; Stop retrying placement coordinates if the game does not
-
-                    ; show the expected unit panel. Mark this point as invalid,
-
-                    ; then try the remaining map positions rather than giving
-
-                    ; up after three blocked/occupied coordinates.
-
-                    failedCoordinates.Push({ x: point.x, y: point.y, slot: slotNum, terrain: smart ? SmartTerrainForSlot(slotNum) : "" })
+                    ; Unconfirmed points cool down; only red previews reject terrain.
+                    if smart {
+                        SmartRememberPoint(placementResult = "blocked" ? failedPoints : batchSkipped, point, placementResult != "blocked")
+                    } else
+                        failedPoints.Push(point)
                     if placementResult != "blocked" {
-                        if smart
-                            SmartRecordPlacementOutcome(slotNum, false)
                         ProcessLog("Placement not verified for unit " slotNum " at " point.x "," point.y "; trying another point")
                     }
 
-                    Wave40Reached()
+                    if smart && SmartHillRegionVersion(slotNum) != search.hillVersion
+                        break ; Newly scanned Hill regions take priority on the next turn.
 
-                    if CheckForXp()
-
-                        return MonitorStage()
-
-                    Reconnect()
-
-                    CheckEndAndRoute()
+                    if !smart {
+                        Wave40Reached()
+                        if CheckForXp()
+                            return MonitorStage()
+                        Reconnect()
+                        CheckEndAndRoute()
+                    }
 
                 }
 
@@ -320,13 +374,26 @@ PlacingUnits() {
 
                     break
 
+                if smart && yieldSlot
+                    break
+
                 if (!hadUntestedPoint) {
                     if smart {
                         searchBatches++
-                        targetPoints := GenerateSmartPoints()
-                        previewDeferred:=[]
-                        ProcessLog("Smart: slot " slotNum " exhausted candidates; generating Random batch " searchBatches)
-                        continue
+                        targetPoints := GenerateSmartPoints(&placementScale, slotNum)
+                        search.points := targetPoints
+                        search.next := 1
+                        if A_TickCount >= search.nextLog {
+                            ProcessLog("Smart: slot " slotNum " exhausted candidates; generating Random batch " searchBatches)
+                            search.nextLog := A_TickCount + 5000
+                        }
+                        yieldSlot := true
+                        ; Keep the slot pending until its configured Count is
+                        ; reached: upgrades wait for every slot, and a finished
+                        ; match or a geometry change is still detected above.
+                        ; All candidates may be in cooldown, so poll slowly.
+                        Sleep(targetPoints.Length > 0 ? 100 : 400)
+                        break
                     }
 
                     ProcessLog("No valid placement points left for unit " slotNum " (" placedCounts[slotNum] "/" placements ")")
@@ -347,13 +414,25 @@ PlacingUnits() {
 
                 }
 
-                Sleep(500)
+                if !smart
+                    Sleep(500)
 
             }
 
+            if smart {
+                search.batches := searchBatches
+                search.unreadable := unreadableStreak
+                if yieldSlot && !stopThisSlot && placedCounts[slotNum] < placements {
+                    slotOrder.Push(slotNum)
+                    if A_TickCount >= search.nextLog {
+                        ProcessLog("Smart: slot " slotNum " yielding (" placedCounts[slotNum] "/" placements "); will retry after other pending slots")
+                        search.nextLog := A_TickCount + 5000
+                    }
+                    continue
+                }
+            }
             if smart && placedCounts[slotNum]<placements {
-                ProcessLog("Smart: slot " slotNum " incomplete (" placedCounts[slotNum] "/" placements "); later slots and upgrading deferred")
-                return false
+                ProcessLog("Smart: slot " slotNum " incomplete (" placedCounts[slotNum] "/" placements "); continuing with other slots and confirmed units")
             }
         }
 
@@ -373,14 +452,38 @@ PlacingUnits() {
 
         ProcessLog("Placed all " placedTotal "/" requestedTotal " units")
 
+    if smart && placedTotal = 0
+        return false
+    if smart && SmartPlacementGeometry() != placementGeometry {
+        successfulCoordinates := []
+        ProcessLog("Smart: client geometry changed; skipping upgrades at stale coordinates")
+        return false
+    }
     UpgradeUnits()
     return true
 
 }
 
+UpgradeWhilePlacing(&cursor) {
+    global successfulCoordinates, PriorityUpgrade
+    ; Keep explicit upgrade priorities and avoid spending on farms mid-placement.
+    if PriorityUpgrade.Value
+        return
+    count := successfulCoordinates.Length
+    loop count {
+        cursor := Mod(cursor, count) + 1
+        coord := successfulCoordinates[cursor]
+        if GetUnitPlacementType(coord.slot) = "Farm"
+            continue
+        ProcessLog("Smart: placement search is taking time; trying one upgrade for confirmed slot " coord.slot)
+        UpgradeUnit(coord.x, coord.y, coord.slot)
+        return
+    }
+}
+
 UpgradeUnits() {
 
-    global successfulCoordinates, PriorityUpgrade, priority1, priority2, priority3, priority4, priority5, priority6
+    global successfulCoordinates, PriorityUpgrade, priority1, priority2, priority3, priority4, priority5, priority6, rblxID
 
     totalUnits := Map()
 
@@ -474,9 +577,10 @@ UpgradeUnits() {
 
                                 if (upgradeResult = false) {
                                     Sleep(200)
-                                    ServiceSummerCards()
-                                    if WinActive(rblxID)
+                                    if !ServiceSummerCards() && WinActive(rblxID) {
+                                        Reconnect()
                                         CheckEndAndRoute()
+                                    }
                                     continue ; no ability/world clicks when the upgrade was not confirmed
                                 }
 
@@ -561,13 +665,15 @@ UpgradeUnits() {
                 }
 
                 if (upgradeResult = false) {
-                                    Sleep(200)
-                                    ServiceSummerCards()
-                                    CheckEndAndRoute()
-                                    continue ; no ability/world clicks when the upgrade was not confirmed
-                                }
+                    Sleep(200)
+                    if !ServiceSummerCards() && WinActive(rblxID) {
+                        Reconnect()
+                        CheckEndAndRoute()
+                    }
+                    continue ; no ability/world clicks when the upgrade was not confirmed
+                }
 
-                                if (upgradeResult = "limit" || upgradeResult = "max") {
+                if (upgradeResult = "limit" || upgradeResult = "max") {
 
                     upgradedCount[coord.slot]++
 
@@ -576,10 +682,7 @@ UpgradeUnits() {
                     )
 
                     successfulCoordinates.RemoveAt(index)
-
-                    CloseUnitPanel()
-
-                    continue
+                    break ; Restart enumeration after removing the current unit.
 
                 }
 
@@ -841,7 +944,7 @@ SummerHandleVerification(targetWin, autoRead) {
         return false
     if autoRead {
         WinGetClientPos(&cx, &cy,,, win)
-        if CaptchaDetect(cx + 315, cy + 266, 170, 46, 400, 340, true) && WinActive(win)
+        if CaptchaDetect(232, 290, 581, 350, 400, 340, true) && WinActive(win)
             FixClick(300, 385)
         Sleep(500)
     }
@@ -1773,7 +1876,7 @@ ClassifyResultScreen(text) {
     return ""
 }
 
-ReadResultScreen(strictSize := true, readButtons := false) {
+ReadResultScreen(strictSize := true, readButtons := false, scale := 2) {
     global rblxID
     if !WinActive(rblxID)
         return 0
@@ -1781,7 +1884,7 @@ ReadResultScreen(strictSize := true, readButtons := false) {
         WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
         if cw<=0 || ch<=0 || (strictSize && (cw!=800 || ch!=599))
             return 0
-        result := OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
+        result := OCR.FromRect(cx, cy, cw, ch, "en-US", scale)
         result.clientW := cw, result.clientH := ch
         ; Ending paths may lose whole labels against green/yellow buttons.
         ; Keep their neutral-white ink in bounded layers; ordinary battle reads
@@ -1819,11 +1922,13 @@ ReadResultScreen(strictSize := true, readButtons := false) {
 }
 
 ResultScreenReady() {
-    result := ReadResultScreen()
-    if IsObject(result) && ResultScreenPhase(result)=""
-        && RegExMatch(result.Text,"i)\bxp\s*progr|\bvictory\b|\bdefeat\b|click.*continue")
-        result:=ReadResultScreen(true,true)
-    return ResultScreenPhase(result) != ""
+    ; Unit actions and the monitor poll this often. Read at native size first.
+    result := ReadResultScreen(true, false, 1)
+    if ResultScreenPhase(result) != ""
+        return true
+    if IsObject(result) && RegExMatch(result.Text,"i)\bxp\s*progr|\bvictory\b|\bdefeat\b|click.*continue")
+        return ResultScreenPhase(ReadResultScreen(true, true)) != ""
+    return false
 }
 
 ResultTextLines(result) {
@@ -1985,48 +2090,6 @@ ClickResultButton(x,y) {
     return true
 }
 
-SkipResultRewards(initialResult := 0, maxClicks := 5) {
-    result:=IsObject(initialResult) ? initialResult : ReadResultScreen(true,true)
-    if !IsObject(result) || ResultScreenPhase(result)!="summary"
-        return false
-    anchor:=FindResultButton(result,"Next","summary")
-    if !IsObject(anchor)
-        anchor:=FindResultRewardPrompt(result)
-    if !IsObject(anchor)
-        return false
-    x:=Round(anchor.x+anchor.w/2),y:=Round(anchor.y+anchor.h/2)
-    misses:=0,clicks:=0
-    while clicks<maxClicks {
-        fresh:=ReadResultScreen(true,true)
-        if !IsObject(fresh)
-            return false
-        if RegExMatch(ResultText(fresh),"i)choose\s+a\s+card|the\s+weather\s+shifts|vote\s+start|disconnected|waiting\s+for\s+players|select\s+world|travell?ing\s+to")
-            return false
-        phase:=ResultScreenPhase(fresh)
-        button:=FindResultButton(fresh,"Next","summary")
-        rewardPage:=ResultRewardPageVisible(fresh)
-        ; Keep five beats even if choices appear early: rewards may arrive late.
-        ; The cached anchor is in the lower summary band, away from choices.
-        if !IsObject(button) && phase!="summary" && phase!="choices" && !rewardPage {
-            if ++misses>=3 {
-                ProcessLog("Result UI: reward page unreadable; stopping reward clicks")
-                return false
-            }
-            Sleep(500)
-            continue
-        }
-        misses:=0
-        if IsObject(button)
-            x:=Round(button.x+button.w/2),y:=Round(button.y+button.h/2)
-        if !ClickResultButton(x,y)
-            return false
-        clicks++
-        ProcessLog("Result UI: skipping summary/reward " clicks "/" maxClicks)
-        Sleep(500)
-    }
-    return true
-}
-
 TryResultAction(&action := "") {
     global MatchMaking
     action := ""
@@ -2036,10 +2099,19 @@ TryResultAction(&action := "") {
     phase := ResultScreenPhase(result)
     if (phase = "")
         return false
-    if phase="summary" {
-        if !SkipResultRewards(result)
+    if (phase = "summary") {
+        ; Victory/defeat: keep clicking one point every 0.7s until the
+        ; Return to lobby / Replay choices replace the summary or reward page.
+        sx := result.HasProp("clientW") ? result.clientW/800 : 1
+        sy := result.HasProp("clientH") ? result.clientH/599 : 1
+        anchor := FindResultRewardPrompt(result)
+        x := IsObject(anchor) ? Round(anchor.x+anchor.w/2) : Round(330*sx)
+        y := IsObject(anchor) ? Round(anchor.y+anchor.h/2) : Round(400*sy)
+        if !ClickResultButton(x, y)
             return false
-        action:="next"
+        ProcessLog("Result UI: summary/reward beat at " x "," y)
+        action := "next"
+        Sleep(700)
         return true
     }
     labels := ChooseResultLabels(MatchMaking.Value)
@@ -2057,7 +2129,7 @@ TryResultAction(&action := "") {
     if !IsObject(fresh) || ResultScreenPhase(fresh) != phase
         return false
     allowed:=false
-    for label in (phase="summary" ? ["Next"] : ChooseResultLabels(MatchMaking.Value)) {
+    for label in ChooseResultLabels(MatchMaking.Value) {
         if label=chosenLabel
             allowed:=true
     }
@@ -2070,7 +2142,7 @@ TryResultAction(&action := "") {
     if !ClickResultButton(x, y)
         return false
     action := chosenLabel = "Next Room" ? "next_room" : (chosenLabel = "Next Level" ? "next_level" : (chosenLabel = "Return to lobby" ? "lobby" : (chosenLabel = "Next" ? "next" : "replay")))
-    ProcessLog("Result UI: " chosenLabel " at " x "," y " -> action=" action " (" rect.source ", matchmaking=" MatchMaking.Value ")")
+    ProcessLog("Result UI: " chosenLabel " at " x "," y " -> action=" action " (" (rect.HasProp("source") ? rect.source : "reward prompt") ", matchmaking=" MatchMaking.Value ")")
     Sleep(500)
     return true
 }
@@ -2145,6 +2217,7 @@ MonitorEndScreen() {
 
 MonitorStage() {
 
+
     global Wins, loss, mode, StoryActDropdown, CARD_ENABLED, lastResult
 
     lastClickTime := A_TickCount
@@ -2177,8 +2250,6 @@ MonitorStage() {
                 FixClick(298, 400)
 
                 FixClick(358, 400)
-
-                MahogoraAbility()
 
                 if (FindText(&x, &y, 0, 0, A_ScreenWidth, A_ScreenHeight, 0, 0, Wave40Inf)) {
 
@@ -2258,12 +2329,13 @@ MonitorStage() {
 
             }
 
-        }
-
-        if ResultScreenReady() {
-            lastResult := "unknown"
-            ProcessLog("Result title unreadable: verified result UI; outcome unknown")
-            return MonitorEndScreen()
+            ; Recheck only after the first result/XP signal, since the panel
+            ; cleanup above may have exposed a title or advanced the screen.
+            if ResultScreenReady() {
+                lastResult := "unknown"
+                ProcessLog("Result title unreadable: verified result UI; outcome unknown")
+                return MonitorEndScreen()
+            }
         }
 
         Reconnect()
@@ -4085,7 +4157,8 @@ RestartStage(knownMap := "") {
         }
         if mode!="Summer Event" && !StartedGame()
             return false
-        PlacingUnits()
+        if !PlacingUnits() && mode = "Summer Event"
+            ProcessLog("Summer Event: placement stopped; continuing to monitor cards and match results")
         MonitorStage()
     } finally {
         EndCardMatch("stage-exit", matchId)
@@ -4154,7 +4227,7 @@ Reconnect() {
 }
 
 PlaceUnit(x, y, slot := 1, physicalKey := false) {
-    global rblxID, PlacementPatternDropdown, SmartPreviewReference
+    global rblxID, mode, PlacementPatternDropdown, SmartPreviewReference
     smart := PlacementPatternDropdown.Text = "Smart"
     ServiceSummerCards(true)
     if !UnitActionAllowed()
@@ -4180,6 +4253,8 @@ PlaceUnit(x, y, slot := 1, physicalKey := false) {
             }
             if !SmartPressSlotKey(slot, physicalKey)
                 return SmartPreviewInterrupted(true) || !UnitActionAllowed() ? "interrupted" : "unreadable"
+            if GetUnitPlacementType(slot) = "Hill"
+                SmartCollectHillRegions()
         } else {
             SendEvent("{" slot "}")
             Sleep(120)
@@ -4189,19 +4264,16 @@ PlaceUnit(x, y, slot := 1, physicalKey := false) {
         if smart {
             if SmartPreviewInterrupted(true)
                 return "interrupted"
-            selectedCount:=ReadUnitDeploymentCount(slot)
             previewDetails := {reason: "unknown", green: 0, red: 0, colors: []}
-            preview := SmartWaitPreviewReady(x, y, 1200, &previewDetails)
+            preview := SmartWaitPreviewReady(x, y, 1000, &previewDetails)
             if preview != "ready" {
                 if preview = "blocked" || preview = "unreadable" {
                     if SmartPreviewInterrupted(true)
                         return "interrupted"
-                    pointUnreadable:=preview="unreadable" && (selectedCount>=0 || SmartPreviewPromptVisible(x,y))
+                    pointUnreadable:=preview="unreadable" && SmartPreviewPromptVisible(x,y)
                     if SmartPreviewInterrupted(true) || !UnitActionAllowed()
                         return "interrupted"
                     SendEvent("q")
-                    if SmartPlacementResourceBlocked()
-                        return "deferred"
                     center := previewDetails.colors.Length >= 3 ? previewDetails.colors[3] : "n/a"
                     ProcessLog("Smart: slot " slot " " (preview = "blocked" ? "red preview rejected" : "preview not verified")
                         " at " x "," y "; reason=" previewDetails.reason ", green=" previewDetails.green "/5, red=" previewDetails.red "/5, center=" center)
@@ -4221,7 +4293,7 @@ PlaceUnit(x, y, slot := 1, physicalKey := false) {
             if sample = "interrupted" || SmartPreviewInterrupted(true)
                 return "interrupted"
             if sample != "green" && sample != "blue" {
-                pointUnreadable:=sample!="red" && (selectedCount>=0 || SmartPreviewPromptVisible(x,y))
+                pointUnreadable:=sample!="red" && SmartPreviewPromptVisible(x,y)
                 if SmartPreviewInterrupted(true) || !UnitActionAllowed()
                     return "interrupted"
                 SendEvent("q")
@@ -4230,19 +4302,40 @@ PlaceUnit(x, y, slot := 1, physicalKey := false) {
             }
             }
         }
+        recoveryWindow := 0
+        if smart && mode = "Summer Event" {
+            try WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+            catch
+                return "interrupted"
+            recoveryWindow := {x:cx, y:cy, w:cw, h:ch}
+        }
         FixClick(x, y)
-        Sleep(350)
-        confirmed := UnitPlaced(x, y, smart ? slot : 0, smart ? selectedCount : -1)
-        if (confirmed = "uncertain")
-            return "uncertain"
-        if (confirmed = true)
-            return true
-        if confirmed="interrupted"
-            return "interrupted"
-        SendEvent("q")
-        if PlacementPatternDropdown.Text = "Smart" && SmartPlacementResourceBlocked()
-            return "deferred"
-        return false
+        if smart {
+            ; 1.5 s per attempt: keep the 1 s settling delay the user asked for,
+            ; then spend the remaining 0.5 s confirming the unit panel.
+            ; Card/focus interruptions are checked throughout.
+            settleUntil := A_TickCount + 1000
+            confirmed := WaitForSmartPlacement(settleUntil + 500, settleUntil)
+            if confirmed = "card-interrupted" {
+                ServiceSummerCards(true)
+                confirmed := RecheckSummerPlacement(x, y, recoveryWindow)
+            }
+            if confirmed = true {
+                ProcessLog("Unit placement confirmed (UPG or close button visible)")
+                if !ServiceSummerCards() && UnitActionAllowed() {
+                    CheckAbility()
+                    CloseUnitPanel()
+                }
+            } else if confirmed = false && !SmartPreviewInterrupted(true) {
+                SendEvent("q")
+            }
+        } else {
+            Sleep(350)
+            confirmed := UnitPlaced()
+            if confirmed = false
+                SendEvent("q")
+        }
+        return confirmed
     } finally {
         if smart
             SmartPreviewReference:=0
@@ -4258,7 +4351,7 @@ MaxUpgrade() {
     static unavailable:=Map()
     for image in ["Images\MaxTag.png","Images\MaxButton.png"] {
         try {
-            if FileExist(image) && ImageSearch(&mX,&mY,0,150,450,500,"*50 " image)
+            if FileExist(image) && ImageSearch(&mX,&mY,110, 249, 309, 442,"*50 " image)
                 return true
         } catch {
             if !unavailable.Has(image) {
@@ -4272,7 +4365,7 @@ MaxUpgrade() {
     return false
 }
 
-UnitPlaced(x := -1, y := -1, slot:=0, beforeCount:=-1) {
+UnitPlaced() {
     global rblxID
     interrupted := false
     Sleep(350)
@@ -4290,35 +4383,38 @@ UnitPlaced(x := -1, y := -1, slot:=0, beforeCount:=-1) {
             ProcessLog("Unit placement confirmed (panel at " panelX "," panelY ")")
             if !ServiceSummerCards() {
                 CheckAbility()
-                MahogoraAbility()
             }
             CloseUnitPanel()
             return true
         }
         Sleep(250)
     }
-    if slot>=1 && slot<=6 && beforeCount>=0 && UnitActionAllowed() {
-        ; Select-only reconciliation: no second placement click, even after a
-        ; card cancelled the ghost or the game did not auto-open the panel.
-        SendEvent("q")
-        if !SmartPressSlotKey(slot,true)
-            return "uncertain"
-        try {
-            Sleep(150)
-            afterCount:=ReadUnitDeploymentCount(slot)
-        } finally {
-            if WinActive(rblxID) && UnitActionAllowed()
-                SendEvent("q")
-        }
-        if afterCount=beforeCount+1 {
-            ProcessLog("Unit placement confirmed by slot " slot " count " beforeCount " -> " afterCount)
-            return true
-        }
-        if afterCount=beforeCount
-            return interrupted ? "interrupted" : false
+    return interrupted || !UnitActionAllowed() ? "uncertain" : false
+}
+
+RecheckSummerPlacement(x, y, originalWindow) {
+    global rblxID
+    if SmartPreviewInterrupted(true) || !UnitActionAllowed()
         return "uncertain"
-    }
-    return interrupted ? "uncertain" : false
+    try WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+    catch
+        return "uncertain"
+    if cx != originalWindow.x || cy != originalWindow.y || cw != originalWindow.w || ch != originalWindow.h
+        return "uncertain"
+    SendEvent("q")
+    if !CloseUnitPanel() || SmartPreviewInterrupted(true) || !UnitActionAllowed()
+        return "uncertain"
+    try WinGetClientPos(&nx, &ny, &nw, &nh, rblxID)
+    catch
+        return "uncertain"
+    if nx != cx || ny != cy || nw != cw || nh != ch
+        return "uncertain"
+    ; Select the existing unit at the original point with no slot key pressed.
+    ProcessLog("Smart: rechecking the last placement after the Summer card")
+    deadline := A_TickCount + 1000
+    FixClick(x, y)
+    confirmed := WaitForSmartPlacement(deadline)
+    return confirmed = "card-interrupted" ? "uncertain" : confirmed
 }
 
 ; The upgrade panel's "Upgrade" button is a solid green block, but the old
@@ -4421,10 +4517,16 @@ EnsureUnitPanelTemplate() {
 }
 
 FindUnitPanel(&panelX := 0, &panelY := 0) {
-    global rblxID, UnitPanelUsesNewUI
+    global rblxID, UnitPanelUsesNewUI, PlacementPatternDropdown
     UnitPanelUsesNewUI := false
     if !WinActive(rblxID)
         return false
+    if (IsSet(PlacementPatternDropdown) && PlacementPatternDropdown.Text = "Smart") && FindSmartPlacementPanel() {
+        UnitPanelUsesNewUI := true
+        WinGetClientPos(,, &cw, &ch, rblxID)
+        panelX := Round(160*cw/800), panelY := Round(375*ch/599)
+        return true
+    }
     ; Plain green/cyan blocks also occur in map scenery (observed: Navy Bay
     ; water at310,93). Require the actual upgrade header and panel controls.
     return FindUpdatedUnitPanel(&panelX, &panelY)
@@ -4473,49 +4575,87 @@ CloseUnitPanel(force := false) {
     return !FindUnitPanel(&panelX, &panelY)
 }
 
-MahogoraAbility() {
-
-    if (FindText(&x, &y, 294, 532, 294, 532, 0, 0, ChangeSkill)) {
-
-        Send("Find Def Type")
-
-        loop 2 {
-
-            FixClick(x, y)
-
-            Sleep(3000)
-
-        }
-
-        ProcessLog("Changed Attack type for Mahogora")
-
-    }
-
-}
-
 CheckAbility() {
 
-    global AutoAbilityBox  ; Reference your checkbox
+    global AutoAbilityBox, rblxID
 
     ; Only check ability if checkbox is checked
+    ; The unit panel sits on the left (Show Upgrade UI on left), so the old
+    ; fixed band 342,253-401,281 was to the right of the real toggle. FindText
+    ; never matched and a live Summer run never logged "Auto-ability is on".
+    ; Search the whole panel band, use the real toggle crop, and confirm the ON
+    ; state before reporting success.
 
-    if (AutoAbilityBox.Value) {
+    if !AutoAbilityBox.Value
+        return false
 
-        if (ok := FindText(&X, &Y, 342, 253, 401, 281, 0, 0, AutoOff)) {
+    if !WinActive(rblxID)
+        return false
 
-            FixClick(X, Y - 20)  ; Turn ability on
+    static offImg := "GameModeImages\SummerQuantum\vision\auto-ability-off.png"
+    static onImg := "GameModeImages\SummerQuantum\vision\auto-ability-on.png"
+    static lastMissing := 0
 
-            ProcessLog("Auto-ability is on")
+    WinGetClientPos(,, &cw, &ch, rblxID)
+    if (cw <= 0 || ch <= 0)
+        return false
 
+    sx := cw / 800, sy := ch / 599
+    x1 := Round(250 * sx), y1 := Round(238 * sy), x2 := Round(440 * sx), y2 := Round(302 * sy)
+
+    oldMouseMode := A_CoordModeMouse, oldPixelMode := A_CoordModePixel
+    CoordMode "Mouse", "Client"
+    CoordMode "Pixel", "Client"
+
+    try {
+        ; Never toggle a switch that is already on.
+        if FileExist(onImg) && ImageSearch(&onX, &onY, x1, y1, x2, y2, "*40 " onImg)
+            return true
+
+        toggle := 0
+        if FileExist(offImg) && ImageSearch(&fx, &fy, x1, y1, x2, y2, "*40 " offImg)
+            toggle := { x: fx, y: fy, w: 48, h: 18, mode: "image" }
+        else if FindText(&fx, &fy, x1, y1, x2, y2, 0, 0, AutoOff)
+            toggle := { x: fx, y: fy, w: 18, h: 24, mode: "findtext" }
+
+        if !IsObject(toggle) {
+            if (A_TickCount - lastMissing > 30000) {
+                lastMissing := A_TickCount
+                ProcessLog("Auto Ability: toggle not found in the unit panel; left unchanged")
+                ; Leave readable evidence instead of guessing a click point.
+                try {
+                    WinGetClientPos(&cx, &cy,,, rblxID)
+                    band := OCR.FromRect(cx + x1, cy + y1, x2 - x1, y2 - y1, "en-US", 3).Text
+                    if Trim(band) != ""
+                        ProcessLog("Auto Ability: panel text was " StrReplace(Trim(band), "`n", " | "))
+                }
+            }
+            return false
         }
 
-        Sleep(500)
+        ; The crop contains the switch, so its centre is the target. The old
+        ; FindText bitmap is the label, which used to be clicked 20px above.
+        clickX := toggle.mode = "image" ? Round(toggle.x + toggle.w / 2) : toggle.x
+        clickY := toggle.mode = "image" ? Round(toggle.y + toggle.h / 2) : toggle.y - 20
+        FixClick(clickX, clickY)
+        Sleep(400)
 
+        if FileExist(onImg) && ImageSearch(&onX, &onY, x1, y1, x2, y2, "*40 " onImg) {
+            ProcessLog("Auto-ability is on")
+            return true
+        }
+
+        ProcessLog("Auto Ability: clicked the toggle but ON was not confirmed")
+        return false
+    } finally {
+        CoordMode "Mouse", oldMouseMode
+        CoordMode "Pixel", oldPixelMode
     }
 
 }
 
 CheckForXp() {
+
 
     if ResultScreenReady() {
         EndCardMatch("result-detected")
@@ -4660,11 +4800,9 @@ UpgradeUnit(x, y, slot := 0) {
         } else {
             limit := GetUnitUpgradeLimit(slot)
             ; One R press per visit, including when a numerical cap is set.
+            ; Ability is handled right after placement; upgrading keeps the
+            ; card check above and does not toggle ability again.
             result := limit<=0 ? PressUnitUpgrade() : ApplyUnitUpgradeLimit(limit, slot)
-            if result!=false && UnitActionAllowed() {
-                CheckAbility()
-                MahogoraAbility()
-            }
         }
     } finally {
         try {
@@ -4779,10 +4917,19 @@ RegularMatchHudVisible() {
 }
 
 CheckLoaded() {
+    global mode
+    summer := mode = "Summer Event"
+    deadline := A_TickCount + 65000
 
     loop {
 
         Sleep(1000)
+
+        ; The Summer vote title confirms the load without a full-client OCR read.
+        if summer && FindVoteStart(&X, &Y) {
+            ProcessLog("Match loaded: Summer Vote Start confirmed")
+            return "loaded"
+        }
 
         if ResultScreenReady()
             return "result"
@@ -4797,7 +4944,7 @@ CheckLoaded() {
         }
 
         ; Check for vote screen
-        if FindVoteStart(&X, &Y) {
+        if !summer && FindVoteStart(&X, &Y) {
 
             ProcessLog("Match loaded")
 
@@ -4816,6 +4963,11 @@ CheckLoaded() {
 
             return "lobby"
 
+        }
+
+        if summer && A_TickCount >= deadline {
+            ProcessLog("Summer Event: still waiting for Vote Start or the match HUD; continuing detection")
+            deadline := A_TickCount + 65000
         }
 
         Reconnect()
@@ -4855,8 +5007,8 @@ StartedGame() {
         }
 
         if (A_TickCount - waitStart > 45000) {
-            ProcessLog("Vote Start timed out; stopping before placement")
-            return false
+            ProcessLog("Vote Start: still waiting for a fresh vote board or active match HUD")
+            waitStart := A_TickCount
         }
 
         if FindVoteStart(&X, &Y) {
@@ -5285,6 +5437,7 @@ GenerateCirclePoints() {
 
 CheckEndAndRoute() {
 
+
     if ((ok := FindText(&X, &Y, 140, 130, 662, 172, 0, 0, LobbyText)) || ResultScreenReady()) {
         EndCardMatch("result-route")
 
@@ -5353,6 +5506,7 @@ StartMacro(*) {
             return
         }
         StartSelectedMode()
+        ProcessLog("Macro workflow returned; press F2 to start again (see preceding status)")
     } catch as err {
         ProcessLog("StartMacro ERROR: " . err.Message . " @ line " . err.Line)
     }
@@ -5692,10 +5846,7 @@ MonitorDungeonEnd() {
 
         }
 
-        ; Dungeon keeps its own routing after the common reward skip.
-        SkipResultRewards()
-
-        ; Check for returning to lobby
+        ; Dungeon keeps its own routing after the common result action.
 
         if TryResultAction(&action) {
             if action="next"

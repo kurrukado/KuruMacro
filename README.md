@@ -28,8 +28,7 @@
 ## Notes
 
 - Everything are very simple so try figure it out!
-- If you wonder what is JEV means, i used JEV AI to this Anime Adventure Macro, this feature makes it focus on good card to increase winning chance
-- Get a free key from typesafe
+- Anime Adventures reads Summer card titles with Windows OCR and votes based on card priority.
 
 ---
 

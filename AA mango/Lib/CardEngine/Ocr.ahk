@@ -1,4 +1,4 @@
-; Card-only capture/OCR; common contrast processing is in Lib/Shared.
+﻿; Card-only capture/OCR; common contrast processing is in Lib/Shared.
 
 ReadCardCrop(dc, x, y, w, h, contrast := false) {
     if contrast
@@ -44,29 +44,36 @@ ReadCardNames(budgetMs, onlySlot := 0, expectedText := "") {
         if (cw <= 0 || ch <= 0 || cw > 4096 || ch > 4096)
             return names
         sx := cw / 800, sy := ch / 599
+        slotLefts := [148, 325, 502]
+        cropW := Round(152*sx), cropH := Round(195*sy)
+        captureLeft := Round(slotLefts[onlySlot ? onlySlot : 1]*sx)
+        captureRight := Round(slotLefts[onlySlot ? onlySlot : 3]*sx) + cropW
+        captureTop := Round(210*sy)
+        captureW := captureRight - captureLeft
         screen := DllCall("user32\GetDC", "Ptr", 0, "Ptr")
         memory := DllCall("gdi32\CreateCompatibleDC", "Ptr", screen, "Ptr")
-        bitmap := DllCall("gdi32\CreateCompatibleBitmap", "Ptr", screen, "Int", cw, "Int", ch, "Ptr")
+        bitmap := DllCall("gdi32\CreateCompatibleBitmap", "Ptr", screen, "Int", captureW, "Int", cropH, "Ptr")
         if (!screen || !memory || !bitmap)
             throw Error("Card offer capture allocation failed")
         previous := DllCall("gdi32\SelectObject", "Ptr", memory, "Ptr", bitmap, "Ptr")
         if (!previous || previous = -1)
             throw Error("Card offer bitmap selection failed")
-        if !DllCall("gdi32\BitBlt", "Ptr", memory, "Int", 0, "Int", 0, "Int", cw, "Int", ch
-            , "Ptr", screen, "Int", cx, "Int", cy, "UInt", 0x00CC0020)
+        if !DllCall("gdi32\BitBlt", "Ptr", memory, "Int", 0, "Int", 0, "Int", captureW, "Int", cropH
+            , "Ptr", screen, "Int", cx + captureLeft, "Int", cy + captureTop, "UInt", 0x00CC0020)
             throw Error("Card offer capture failed")
         ; All three slots and both OCR modes come from this ONE frozen frame.
-        for i, left in [143, 320, 497] {
+        for i, left in slotLefts {
             if (onlySlot && i != onlySlot)
                 continue
+            if !WinActive(rblxID) || !CardScreenVisible(true)
+                return ["", "", ""]
             if (A_TickCount - started >= budgetMs) {
                 CARD_READ_CONFLICTS[i] := true
                 continue
             }
-            x := Round((left + 5)*sx), y := Round(210*sy)
-            w := Round(152*sx), h := Round(195*sy)
+            x := Round(left*sx) - captureLeft
             try {
-                raw := ReadCardCrop(memory, x, y, w, h)
+                raw := ReadCardCrop(memory, x, 0, cropW, cropH)
                 if (A_TickCount - started >= budgetMs) {
                     CARD_READ_CONFLICTS[i] := true
                     continue
@@ -78,7 +85,7 @@ ReadCardNames(budgetMs, onlySlot := 0, expectedText := "") {
                     names[i] := raw
                     continue
                 }
-                contrast := ReadCardCrop(memory, x, y, w, h, true)
+                contrast := ReadCardCrop(memory, x, 0, cropW, cropH, true)
                 raw := SubStr(Trim(RegExReplace(raw, "\s+", " ")), 1, 500)
                 contrast := SubStr(Trim(RegExReplace(contrast, "\s+", " ")), 1, 500)
                 if CardEffectsAgree(raw, contrast) || CardRawNeedsConfirmation(raw, contrast) {
@@ -103,6 +110,13 @@ ReadCardNames(budgetMs, onlySlot := 0, expectedText := "") {
             DllCall("gdi32\DeleteDC", "Ptr", memory)
         if screen
             DllCall("user32\ReleaseDC", "Ptr", 0, "Ptr", screen)
+    }
+    try {
+        WinGetClientPos(&nx, &ny, &nw, &nh, rblxID)
+        if !WinActive(rblxID) || nx != cx || ny != cy || nw != cw || nh != ch
+            return ["", "", ""]
+    } catch {
+        return ["", "", ""]
     }
     return names
 }

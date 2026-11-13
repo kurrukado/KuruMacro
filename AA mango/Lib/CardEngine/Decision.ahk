@@ -1,13 +1,12 @@
 ; Card engine: Decision. Runtime behavior preserved during extraction.
 
 ChooseCard(names, &reason := "", deadlineTick := 0) {
-    global JEV_LAST_MS, CARD_READ_CONFLICTS, CARD_READ_BUDGET_MS, JEV_LAST_DETAILS, CARD_LAST_ANALYSIS
-    JEV_LAST_MS := 0
+    global CARD_READ_CONFLICTS, CARD_READ_BUDGET_MS, CARD_LAST_ANALYSIS
     if !(names is Array) || names.Length != 3 {
         reason := "invalid offer"
         return 0
     }
-    scores := [], policies := [], origins := [], unknown := false
+    scores := [], policies := [], origins := []
     for i, text in names {
         policy := AnalyzeCardEffects(text)
         if (CARD_READ_CONFLICTS.Has(i) && CARD_READ_CONFLICTS[i]) {
@@ -27,29 +26,12 @@ ChooseCard(names, &reason := "", deadlineTick := 0) {
                 scores.Push(cached.score), origins.Push("memory:" cached.source)
                 policy.resistance := Max(policy.resistance, cached.resistance)
             } else {
-                scores.Push(""), origins.Push("unknown"), unknown := true
+                scores.Push(""), origins.Push("unknown")
             }
         } else {
             scores.Push(value), origins.Push(policy.known ? "signed-effects" : "manual-local")
             if policy.known
                 CardMemoryStoreLocal(text, policy)
-        }
-    }
-    remaining := deadlineTick > 0 ? Max(0, deadlineTick - A_TickCount - 1750) : 0
-    if (unknown && (deadlineTick = 0 || remaining > 0)) {
-        js := JevScore(names, &jok, remaining)
-        if (jok && js.Length = 3) {
-            for i, text in names {
-                if (!policies[i].blocked && origins[i] = "unknown" && Type(js[i]) != "String") {
-                    scores[i] := (js[i] - 2) * 50
-                    origins[i] := "jev-new-mechanic"
-                    if (JEV_LAST_DETAILS.Length >= i) {
-                        detail := JEV_LAST_DETAILS[i]
-                        policies[i].resistance := Max(policies[i].resistance, detail.resistance)
-                        CardMemoryStoreAI(names[i], detail)
-                    }
-                }
-            }
         }
     }
     CARD_LAST_ANALYSIS := []
