@@ -11,7 +11,7 @@ if (A_ScriptFullPath = A_LineFile) {
 
 ; Basic Application Info
 global aaTitle := "KuruMacro Anime Adventures "
-global version := "v4.1"
+global version := "v4.2"
 global rblxID := "ahk_exe RobloxPlayerBeta.exe"
 ;Coordinate and Positioning Variables
 global targetWidth := 816
@@ -135,7 +135,6 @@ OpenConfigPopup(kind, *) {
             }
             popup.Add("Button", "x210 y175 w105 h28", "Save").OnEvent("Click", SaveKeybindSettings)
             popup.SetFont("Bold s9 c" uiTheme[1])
-
             KuruButtons.Apply(popup)
             KuruMotion.Open(popup, "w340 h225")
         case "Discord":
@@ -153,48 +152,9 @@ OpenConfigPopup(kind, *) {
             popup.Add("Button", "x278 y150 w110 h28", "Save").OnEvent("Click", (*) => SaveWebhookSettings())
             KuruButtons.Apply(popup)
             KuruMotion.Open(popup, "w410 h200")
-        case "JEV":
-            popup.Add("Text", "x18 y18", "API key")
-            global JevKeyBox := popup.Add("Edit", "x18 y45 w370 h24 Password c" uiTheme[6])
-            global JevKeyStatus := popup.Add("Text", "x18 y90 w240 h24", "")
-            try {
-                keyPath := A_ScriptDir "\Settings\JevKey.txt"
-                if FileExist(keyPath)
-                    JevKeyBox.Value := Trim(FileRead(keyPath, "UTF-8"))
-                JevKeyStatus.Text := JevKeyBox.Value = "" ? "No key configured" : "Key configured"
-            } catch {
-                JevKeyStatus.Text := "Could not load key"
-            }
-            popup.Add("Button", "x278 y85 w110 h28", "Save key").OnEvent("Click", SaveJevSettings)
-            KuruButtons.Apply(popup)
-            KuruMotion.Open(popup, "w410 h135")
     }
 }
 
-SaveJevSettings(*) {
-    global JevKeyBox, JevKeyStatus, JEV_KEY
-
-    key := Trim(JevKeyBox.Value)
-    keyPath := A_ScriptDir "\Settings\JevKey.txt"
-    tempPath := keyPath "." DllCall("GetCurrentProcessId") ".tmp"
-    try {
-        ; Replace only after the entire new key has been written successfully.
-        DirCreate(A_ScriptDir "\Settings")
-        keyFile := FileOpen(tempPath, "w", "UTF-8-RAW")
-        try keyFile.Write(key)
-        finally keyFile.Close()
-        FileMove(tempPath, keyPath, true)
-        JEV_KEY := key
-        JevKeyBox.Value := key
-        JevKeyStatus.Text := key = "" ? "Key cleared" : "Key saved"
-        return true
-    } catch {
-        try FileDelete(tempPath)
-        ; Do not include exception text: it could contain credentials.
-        JevKeyStatus.Text := "Could not save key"
-        return false
-    }
-}
 
 OpenGuide(*) {
     GuideGUI := Gui("+AlwaysOnTop")
@@ -380,6 +340,7 @@ try KuruButtons.Apply(aaMainUI)
 aaMainUI.Show("x0 y0 w1630 h633")
 LayoutProcessHistory()
 forceRobloxSize()  ; Initial force size and position
+
 ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION ;------UNIT CONFIGURATION
 ;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS
 
@@ -551,7 +512,7 @@ ApplyCompactLayout() {
     PlacementPatternDropdown.OnEvent("Change", ResizePlacingDropdown)
     SaveChestsBox.Move(818, 423, 280)
     aaMainUI.SetFont("Bold s10", "Segoe UI")
-    for index, label in ["Keybinds", "Discord", "JEV"]
+    for index, label in ["Keybinds", "Discord"]
         aaMainUI.Add("Button", "x" (818 + (index - 1)*156) " y454 w148 h28", label).OnEvent("Click", OpenConfigPopup.Bind(label))
     aaMainUI.SetFont("Bold s9  c" uiTheme[1], "Segoe UI")
     PriorityPanelTitle := aaMainUI.Add("Text", "x818 y500 w440 h20 Hidden", "Upgrade priority")

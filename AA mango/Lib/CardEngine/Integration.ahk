@@ -1,7 +1,7 @@
 ; Public hooks called by placement/upgrade and Smart calibration.
 
 ServiceSummerCards(force := false) {
-    global mode, CARD_ENABLED, rblxID, CARD_OFFER_ACTIVE
+    global mode, CARD_ENABLED, rblxID, CARD_OFFER_ACTIVE, CARD_INPUT_BLOCKED, CARD_ACTION_BUSY
     static busy := false, lastCheck := 0
     if (busy || !CARD_ENABLED || mode != "Summer Event" || !WinActive(rblxID))
         return false
@@ -10,10 +10,17 @@ ServiceSummerCards(force := false) {
     lastCheck := A_TickCount
     busy := true
     try {
-        if (!CARD_OFFER_ACTIVE && !CardScreenVisible())
+        if (!CARD_OFFER_ACTIVE && !CardScreenVisible(force || CARD_INPUT_BLOCKED)) {
+            ; UnitActionAllowed can see a brief offer that disappears before
+            ; WaitForCardChoice starts. Smart checks the lock before it calls
+            ; UnitActionAllowed again, so this orphan lock must recover here.
+            if CARD_INPUT_BLOCKED && !CARD_ACTION_BUSY && WinActive(rblxID) {
+                CARD_INPUT_BLOCKED := false
+                ProcessLog("Card: board gone; released pending input lock and resuming units")
+            }
             return false
-        ; Cancel the placement ghost before voting. The caller reselects its slot.
-        SendEvent("q")
+        }
+        ; WaitForCardChoice clears the ghost after confirming the offer is visible.
         WaitForCardChoice(mode)
         return true
     } finally {

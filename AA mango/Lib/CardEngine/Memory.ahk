@@ -199,7 +199,7 @@ CardMatchContext() {
     return {mode: CARD_MATCH["mode"], map: CARD_MATCH["map"], votedCards: recent, activeEffectsConfirmed: false}
 }
 
-RecordCardMatch(names, pick, elapsed, reason) {
+RecordCardMatch(names, pick, elapsed, reason, randomVote := false) {
     global CARD_MATCH, CARD_MATCH_PATH, CARD_LAST_ANALYSIS, JEV_LAST_DETAILS
     if !IsObject(CARD_MATCH)
         return
@@ -210,11 +210,13 @@ RecordCardMatch(names, pick, elapsed, reason) {
         events.RemoveAt(1)
     if (pick >= 1 && pick <= names.Length) {
         CARD_MATCH["votesTotal"] += 1
-        policy := AnalyzeCardEffects(names[pick])
-        CARD_MATCH["votedCards"].Push({text: names[pick], effects: policy.signature
-            , source: reason, offer: CARD_MATCH["offerSequence"], confirmation: "vote-only"})
-        if CARD_MATCH["votedCards"].Length > 100
-            CARD_MATCH["votedCards"].RemoveAt(1)
+        if !randomVote {
+            policy := AnalyzeCardEffects(names[pick])
+            CARD_MATCH["votedCards"].Push({text: names[pick], effects: policy.signature
+                , source: reason, offer: CARD_MATCH["offerSequence"], confirmation: "vote-only"})
+            if CARD_MATCH["votedCards"].Length > 100
+                CARD_MATCH["votedCards"].RemoveAt(1)
+        }
     }
     CardWriteJSON(CARD_MATCH_PATH, CARD_MATCH)
 }

@@ -1,9 +1,10 @@
-; Experimental code is local to DEV. No PROD files or settings are written.
+﻿; Smart placement and other opt-in helpers.
 global SmartPlacementColor := -1
 global SummerMinimumPlayers := 4
 try SmartPlacementColor := Integer(IniRead(A_ScriptDir "\Settings\SmartPlacement.ini", "Preview", "Color", "-1"))
 global SmartPlacementState := Map()
 global SmartPreviewReference := 0
+global SmartHillRegions := 0, SmartHillBefore := 0, SmartHillRevision := 0
 
 
 
@@ -39,7 +40,7 @@ CalibrateSmartPlacement(*) {
     }
 }
 
-GenerateSmartPoints() {
+GenerateSmartPoints(&scale := 0, slot := 0) {
     global rblxID
     try WinGetClientPos(,, &cw, &ch, rblxID)
     catch {
@@ -48,25 +49,324 @@ GenerateSmartPoints() {
     }
     if cw <= 0 || ch <= 0
         return []
+    minX := Ceil(cw * 0.12), maxX := Floor(cw * 0.88)
+    minY := Ceil(ch * 0.22), maxY := Floor(ch * 0.78)
+    if minX > maxX || minY > maxY
+        return []
+    scale := {x: cw / 800, y: ch / 599}
     points := []
-    ; All Smart types share Random search across the arena, outside HUD/hotbar.
-    spacing := Max(20, Round(40 * cw / 800))
-    loop 400 {
-        x := Random(Ceil(cw * 0.12), Floor(cw * 0.88))
-        y := Random(Ceil(ch * 0.22), Floor(ch * 0.78))
-        crowded := false
-        for point in points {
-            if (x - point.x)**2 + (y - point.y)**2 < spacing**2 {
-                crowded := true
+    ; Standard placement camera: feet project slightly below the client center.
+    ; Ground/Farm/Hybrid stay local even after exhausting a batch. Only Hill
+    ; expands beyond the player's immediate surroundings to seek platforms.
+    centerX := cw/2, centerY := ch*0.55
+    kind := slot >= 1 && slot <= 6 ? GetUnitPlacementType(slot) : ""
+    hill := kind = "Hill"
+    ; Rings are [inner, outer] pairs in reference pixels. Ground/Farm/Hybrid stay
+    ; local; only Hill expands beyond the player's immediate surroundings.
+    ; Farm walks the widest ring first and works inward, so farms fill the
+    ; outside of the placement area instead of hugging the player.
+    bands := [[0,24],[24,48],[48,72],[72,96]]
+    if hill
+        bands := [[0,24],[24,48],[48,72],[72,96],[96,175],[175,250],[250,400]]
+    else if kind = "Farm"
+        bands := [[72,96],[48,72],[24,48],[0,24]]
+    for band in bands {
+        inner := band[1], outer := band[2]
+        added := 0
+        loop 160 {
+            radius := Sqrt(Random(inner*inner, outer*outer))
+            angle := Mod(A_Index, 2) ? Random(0,359) : Random(0,3)*90 + Random(-10,10)
+            angle *= 0.0174532925199433
+            point := {x: Round(centerX + Cos(angle)*radius*scale.x), y: Round(centerY + Sin(angle)*radius*scale.y)}
+            actualRadius2 := ((point.x-centerX)/scale.x)**2 + ((point.y-centerY)/scale.y)**2
+            if actualRadius2 > outer*outer || actualRadius2 < inner*inner
+                continue
+            if point.x < minX || point.x > maxX || point.y < minY || point.y > maxY
+                continue
+            if SmartPlacementTooClose(points, point, scale, outer <= 48 ? 8 : outer <= 110 ? 12 : 24)
+                continue
+            points.Push(point)
+            if ++added >= 8
                 break
-            }
         }
-        if !crowded
-            points.Push({x: x, y: y})
-        if points.Length >= 40
-            break
+    }
+    if hill {
+        hints := SmartHillRegionPoints(slot)
+        if hints.Length {
+            ordered := hints.Clone()
+            for point in points {
+                if !SmartPlacementTooClose(ordered, point, scale, 8)
+                    ordered.Push(point)
+            }
+            return ordered
+        }
     }
     return points
+}
+
+SmartHillCaptureGrid() {
+    global rblxID
+    if SmartPreviewInterrupted(true)
+        return 0
+    screen := 0, memory := 0, bitmap := 0, previous := 0
+    try {
+        WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+        if cw <= 0 || ch <= 0
+            return 0
+        left := Ceil(cw*.12), top := Ceil(ch*.22)
+        w := Floor(cw*.88)-left+1, h := Floor(ch*.78)-top+1
+        stepX := Max(1,Round(12*cw/800)), stepY := Max(1,Round(12*ch/599))
+        screen := DllCall("GetDC", "Ptr", 0, "Ptr")
+        memory := DllCall("CreateCompatibleDC", "Ptr", screen, "Ptr")
+        info := Buffer(40,0)
+        NumPut("UInt",40,"Int",w,"Int",-h,"UShort",1,"UShort",32,info)
+        bitmap := DllCall("CreateDIBSection","Ptr",screen,"Ptr",info,"UInt",0,"Ptr*",&bits:=0,"Ptr",0,"UInt",0,"Ptr")
+        if !screen || !memory || !bitmap || !bits
+            return 0
+        previous := DllCall("SelectObject","Ptr",memory,"Ptr",bitmap,"Ptr")
+        if !previous || !DllCall("BitBlt","Ptr",memory,"Int",0,"Int",0,"Int",w,"Int",h,"Ptr",screen,"Int",cx+left,"Int",cy+top,"UInt",0x00CC0020)
+            return 0
+        DllCall("GdiFlush")
+        cols := Floor((w-1)/stepX)+1, rows := Floor((h-1)/stepY)+1
+        colors := []
+        loop rows {
+            row := A_Index-1
+            loop cols
+                colors.Push(NumGet(bits,(row*stepY*w+(A_Index-1)*stepX)*4,"UInt") & 0xFFFFFF)
+        }
+        WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
+        if SmartPreviewInterrupted(true) || nx!=cx || ny!=cy || nw!=cw || nh!=ch
+            return 0
+        return {colors:colors, cols:cols, rows:rows, left:left, top:top, stepX:stepX, stepY:stepY
+            , view:WinExist(rblxID) "," cx "," cy "," cw "," ch, tick:A_TickCount}
+    } catch {
+        return 0
+    } finally {
+        if previous
+            DllCall("SelectObject","Ptr",memory,"Ptr",previous)
+        if bitmap
+            DllCall("DeleteObject","Ptr",bitmap)
+        if memory
+            DllCall("DeleteDC","Ptr",memory)
+        if screen
+            DllCall("ReleaseDC","Ptr",0,"Ptr",screen)
+    }
+}
+
+SmartHillGreen(color) {
+    r := (color>>16)&255, g := (color>>8)&255, b := color&255
+    return g >= 100 && g-r >= 45 && g-b >= 30
+}
+
+SmartHillColorDelta(a,b) {
+    return Abs(((a>>16)&255)-((b>>16)&255)) + Abs(((a>>8)&255)-((b>>8)&255)) + Abs((a&255)-(b&255))
+}
+
+SmartHillBuildRegions(before, after) {
+    if before.view != after.view || before.colors.Length != after.colors.Length
+        return []
+    mask := Map(), points := []
+    for index,color in after.colors {
+        old := before.colors[index]
+        if SmartHillGreen(color) && (!SmartHillGreen(old) || SmartHillColorDelta(color,old)>=100)
+            mask[index] := true
+    }
+    ; Keep actual interior cells, never fill a rectangle across holes or edges.
+    for index in mask {
+        col := Mod(index-1,after.cols), row := Floor((index-1)/after.cols)
+        neighbors := (col>0 && mask.Has(index-1)) + (col<after.cols-1 && mask.Has(index+1))
+            + (row>0 && mask.Has(index-after.cols)) + (row<after.rows-1 && mask.Has(index+after.cols))
+        if neighbors < 3
+            continue
+        points.Push({x:after.left+col*after.stepX, y:after.top+row*after.stepY})
+    }
+    ; Uniformly retain coverage across all visible platforms within a small cap.
+    if points.Length > 128 {
+        reduced := []
+        loop 128
+            reduced.Push(points[Floor((A_Index-1)*points.Length/128)+1])
+        return reduced
+    }
+    return points
+}
+
+SmartHillSceneMatches(a,b) {
+    if a.view != b.view || a.colors.Length != b.colors.Length
+        return false
+    changed := 0, sampled := 0
+    loop Ceil(a.colors.Length/7) {
+        index := (A_Index-1)*7+1
+        sampled++
+        if SmartHillColorDelta(a.colors[index],b.colors[index])>100
+            changed++
+    }
+    return changed <= sampled*.30
+}
+
+SmartPrepareHillRegions() {
+    global SmartHillRegions, SmartHillBefore, SmartHillRevision
+    SmartHillBefore := 0
+    current := SmartHillCaptureGrid()
+    if !IsObject(current) {
+        SmartHillRegions := 0
+        return
+    }
+    if IsObject(SmartHillRegions) && A_TickCount-SmartHillRegions.tick < 10000
+        && SmartHillSceneMatches(SmartHillRegions.before,current)
+        return
+    SmartHillRegions := 0
+    SmartHillBefore := current
+}
+
+SmartCollectHillRegions() {
+    global SmartHillRegions, SmartHillBefore, SmartHillRevision
+    before := SmartHillBefore, SmartHillBefore := 0
+    if !IsObject(before) || A_TickCount-before.tick > 3500
+        return
+    after := SmartHillCaptureGrid()
+    if !IsObject(after) || after.view != before.view
+        return
+    points := SmartHillBuildRegions(before,after)
+    SmartHillRevision++
+    SmartHillRegions := {points:points, before:before, tick:A_TickCount, version:SmartHillRevision}
+    ProcessLog("Smart Hill: cached " points.Length " green interior candidates; preview still required")
+}
+
+SmartHillRegionVersion(slot) {
+    global SmartHillRegions, rblxID
+    if slot<1 || slot>6 || GetUnitPlacementType(slot)!="Hill" || !IsObject(SmartHillRegions)
+        return 0
+    if SmartPreviewInterrupted(true) || A_TickCount-SmartHillRegions.tick >= 10000 {
+        SmartHillRegions := 0
+        return 0
+    }
+    try {
+        WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
+        if (WinExist(rblxID) "," cx "," cy "," cw "," ch) != SmartHillRegions.before.view {
+            SmartHillRegions := 0
+            return 0
+        }
+        return SmartHillRegions.version
+    }
+    return 0
+}
+
+SmartHillRegionPoints(slot) {
+    global SmartHillRegions
+    if !SmartHillRegionVersion(slot)
+        return []
+    points := SmartHillRegions.points.Clone()
+    ; Randomize within the mask so one edge is not tested first on every pass.
+    loop points.Length {
+        index := Random(A_Index,points.Length)
+        temp := points[A_Index], points[A_Index] := points[index], points[index] := temp
+    }
+    return points
+}
+
+SmartPlacementTooClose(points, candidate, scale, distance := 24) {
+    for point in points {
+        dx := (point.x - candidate.x) / scale.x
+        dy := (point.y - candidate.y) / scale.y
+        if dx*dx + dy*dy < distance*distance
+            return true
+    }
+    return false
+}
+
+SmartPlacementGeometry() {
+    global rblxID
+    try {
+        WinGetClientPos(&x, &y, &w, &h, rblxID)
+        return w > 0 && h > 0 ? x "," y "," w "," h : ""
+    }
+    return ""
+}
+
+SmartRememberPoint(points, point, temporary := false) {
+    ; Bound pass-local memory. No bitmap or OCR result is retained.
+    points.Push({x: point.x, y: point.y, until: temporary ? A_TickCount + 15000 : 0})
+    if points.Length > 256
+        points.RemoveAt(1)
+}
+
+SmartRecentPoint(points, point, scale) {
+    index := points.Length
+    while index > 0 {
+        previous := points[index]
+        if previous.until && A_TickCount >= previous.until
+            points.RemoveAt(index)
+        else if ((previous.x-point.x)/scale.x)**2 + ((previous.y-point.y)/scale.y)**2 < 8**2
+            return true
+        index--
+    }
+    return false
+}
+
+FindSmartPlacementPanel() {
+    global rblxID
+    ; User-approved UPG image is primary; red X remains an alternate marker.
+    ; Restrict both to the unit panel, never arbitrary dialogs elsewhere.
+    static header := "|<UPGUser>FFCC00-504940$27.000000000MPs733TXyMPCQX3Mr0MP6nn3TaSMPwslaM3aDn0DkMM0s000000000U"
+    static closeX := "|<UnitCloseX>FFFFFF-323232$23.00000000000000000000A1U0Q700wS00zk00zU00y003y00DS00wS01UQ0000000000000001"
+    oldPixelMode := A_CoordModePixel
+    CoordMode "Pixel", "Screen"
+    try {
+        WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+        sx := cw/800, sy := ch/599
+        if sx <= 0 || sy <= 0
+            return false
+        headerFound := FindText(,, cx + Round(135*sx), cy + Round(217*sy), cx + Round(188*sx), cy + Round(275*sy)
+            , 0.15, 0.15, header, 1, 0, 0, 20, 10, 1, sx, sy)
+        if !headerFound {
+            if !FindText(&buttonX, &buttonY, cx + Round(240*sx), cy + Round(180*sy), cx + Round(310*sx), cy + Round(260*sy)
+                , 0.15, 0.15, closeX, 1, 0, 0, 20, 10, 1, sx, sy)
+                return false
+            redButton := false
+            for offset in [-9, 9] {
+                color := PixelGetColor(buttonX + Round(offset*sx), buttonY)
+                if ((color>>16)&255) >= 140 && ((color>>8)&255) < 110 && (color&255) < 110
+                    redButton := true
+            }
+            if !redButton
+                return false
+        }
+        WinGetClientPos(&nx, &ny, &nw, &nh, rblxID)
+        return WinActive(rblxID) && nx = cx && ny = cy && nw = cw && nh = ch
+    } catch {
+        return false
+    } finally {
+        CoordMode "Pixel", oldPixelMode
+    }
+    return false
+}
+
+WaitForSmartPlacement(deadline, settleUntil := 0) {
+    global rblxID, mode, CARD_OFFER_ACTIVE
+    ; Leave time for the final native image match and Windows timer rounding.
+    scanUntil := deadline - 75
+    moved := false
+    while A_TickCount < scanUntil {
+        if !WinActive(rblxID)
+            return "uncertain"
+        if mode = "Summer Event" && (CARD_OFFER_ACTIVE || CardScreenVisible(true))
+            return "card-interrupted"
+        ; Keep the mouse at the clicked point throughout the settling delay.
+        ; Then move only (no click) to remove hover labels before recognition.
+        if !moved && A_TickCount >= settleUntil {
+            try {
+                WinGetClientPos(,, &cw, &ch, rblxID)
+                FixMove(Round(638*cw/800), Round(500*ch/599))
+            }
+            moved := true
+        }
+        if A_TickCount >= settleUntil && FindSmartPlacementPanel() && A_TickCount < deadline
+            return true
+        remaining := scanUntil - A_TickCount
+        if remaining > 0
+            Sleep(Min(60, remaining))
+    }
+    return false
 }
 
 SmartPointAllowed(x, y) {
@@ -75,9 +375,10 @@ SmartPointAllowed(x, y) {
 }
 
 ResetSmartPlacementState() {
-    global SmartPlacementState,SmartPreviewReference
+    global SmartPlacementState,SmartPreviewReference,SmartHillRegions,SmartHillBefore
     SmartPlacementState := Map()
     SmartPreviewReference:=0
+    SmartHillRegions:=0, SmartHillBefore:=0
 }
 
 SmartPointIsRed(x, y) {
@@ -89,7 +390,10 @@ SmartCapturePreviewReference(x,y,slot:=0) {
     global SmartPreviewReference,SmartPreviewUnitType
     SmartPreviewReference:=0
     SmartPreviewUnitType:=slot>=1 && slot<=6 ? GetUnitPlacementType(slot) : "Ground"
-    return SmartReadPreviewSample(x,y,&details,true)="baseline"
+    ready := SmartReadPreviewSample(x,y,&details,true)="baseline"
+    if ready && SmartPreviewUnitType="Hill"
+        SmartPrepareHillRegions()
+    return ready
 }
 
 SmartReadTerrainPixels(screenX,screenY,dx,dy,greenPalette,redPalette,&details) {
@@ -290,41 +594,6 @@ SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
     }
 }
 
-ReadUnitDeploymentCount(slot) {
-    global rblxID
-    static tokens:="|<0/1>FFFFFF-505050$25.00207U3Urw1lzy9lzXUtzlksTksQ3sQQ1yCC0z7C0Tz70Czb0773U1U0U08|<1/1>FFFFFF-505050$22.00E0M3UnUCDy9lzs7DzUsTC3UQsQ1nVk7CC0Qss1nb076Q0A0U08|<0/2>FFFFFF-505050$29.00200S0C7Vz0Qzby9lziC3bbQQCC6ksQ8RVlk1vXXUDb7C0wDwQ3zjtkDz73UDy02002|<1/2>FFFFFF-505050$26.00E01UC7Us3bwy9lzjUQwvsCC6C3V3XVk1ssQ1wCC0w3XUTwtkDz6Q1zk2002|<2/2>FFFFFF-505050$29.00200S0C7Vy0Qzby9lziS3bbMQCC6lkQ8Q7Vk1sy3UDXkC0wDyQ3zzxkDzzvUDy02002|<0/3>FFFFFF-505050$29.00200S0C7Vz0Qzry9lziC3V7QQC0yksQ1tVlk3vXXU0z7C3VzwQ3zDtk7y73U3k02002|<1/3>FFFFFF-505050$26.00E01UC7Us3byy9lzjUQ8vsC0yC3UD3Vk3ssQ07CC3VnXUTstk7y6Q0S02002|<2/3>FFFFFF-505050$29.00200S0C7Vy0Qzry9lziS3V7MQC0ylkQ1s7Vk3sy3U0vkC3VzyQ3zTxk7yzvU3k02002|<3/3>FFFFFF-505050$30.001007U3VsTs3byTsb7y8s72C3sC0y3kC0w3sQ0y0QQ07sQsC7Tss7yTtk7y7Vk1s00U00U|<0/4>FFFFFF-505050$28.00200w0QMrw1lbzlCCTXUstyC73bksQAT3XVzyCC7zstkDzz701rws0773U0A04008|<1/4>FFFFFF-505050$25.00E030QMnUCAzlCCTs77Dw73bC3VXb3VznVkztlkDwss0CQs076Q01U4008|<2/4>FFFFFF-505050$28.00200w0QMrs1lbzlCCTbUstwC73blkQAQD3VznsC7zS1kDzzb01zys07zvU0A04008|<3/4>FFFFFF-505050$29.00100D076BzUCAvz4stmC1lnVw73b3kC6C7ksTw1lkzz3b0zryC03jws077Vk0601002|<4/4>FFFFFF-505050$28.00200lUQMnC1lbQtCCRnUstrC73bMsQATzXVzzyC7zTtkDw3b01kCs070PU0A04008"
-    if slot<1 || slot>6 || !WinActive(rblxID) || !UnitActionAllowed()
-        return -1
-    try {
-        WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
-        left:=Round((205+(slot-1)*64)*cw/800)
-        found:=false,capture:=1
-        ; Prefer the closest glyph match; never mix a loose match with an exact
-        ; match (0 and3 can otherwise become ambiguous after UI antialiasing).
-        for tolerance in [0,0.02,0.04,0.06,0.08,0.10] {
-            found:=FindText(&px,&py,cx+left,cy+Round(498*ch/599),cx+left+Round(70*cw/800),cy+Round(530*ch/599),tolerance,tolerance,tokens,capture,1,0,20,10,1,cw/800,ch/599)
-            capture:=0
-            if found
-                break
-        }
-        counts:=Map()
-        if found {
-            for hit in found {
-                if RegExMatch(hit.id,"^([0-4])/[1-4]$",&m)
-                    counts[Integer(m[1])]:=true
-            }
-        }
-        WinGetClientPos(&nx,&ny,&nw,&nh,rblxID)
-        if !WinActive(rblxID) || !UnitActionAllowed() || nx!=cx || ny!=cy || nw!=cw || nh!=ch
-            return -1
-        if counts.Count=1 {
-            for count in counts
-                return count
-        }
-    }
-    return -1
-}
-
 SmartPreviewPromptVisible(x,y) {
     ; Compatibility helper for point recovery: colors only, no text/key icons.
     ; Never called by the pixel reader itself.
@@ -424,12 +693,6 @@ SmartRecordPlacementOutcome(slot, outcome) {
     return false
 }
 
-SmartPlacementResourceBlocked() {
-    ; Read only after a failed placement, not continuously during the match.
-    text := SummerReadUI()
-    return !!RegExMatch(text, "i)not\s+enough\s+(?:money|yen|cash)|insufficient\s+(?:funds|money)|(?:cannot|can't)\s+afford")
-}
-
 
 
 
@@ -447,7 +710,7 @@ ReadSummerVotePlayers() {
             return Integer(m[2])
         ; Windows OCR drops the short fraction even when it is clearly visible.
         ; Measured white digit masks; search ONLY the denominator, never votes cast.
-        masks := "|<1>*180$9.zy1kDlyDlyDlyDlyDlyDlzw|<2>*180$10.zzVs1X3yDszXwTXwTXwTU20DzU|<3>*180$11.zz0C0TszXyDwDsDyDwTsnV07kzzw"
+        masks := "|<1>*180$9.zy1kDlyDlyDlyDlyDlyDlzw|<2>*180$10.zzVs1X3yDszXwTXwTXwTU20DzU|<3>*180$11.zz0C0TszXyDwDsDyDwTsnV07kzzw|<6>*180$11.zzzzzz3k3XzDyzx1s1nljXT6QQ0y7zzzzU"
         if (matches := FindText(&px, &py, cx + Round(400*sx), cy + Round(65*sy), cx + Round(425*sx), cy + Round(90*sy), 0, 0, masks, 1, 0, 0, 20, 10, 1, sx, sy))
             return Integer(matches[1].id)
     }
