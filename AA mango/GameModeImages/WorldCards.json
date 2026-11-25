@@ -1,0 +1,468 @@
+{
+  "clientWidth": 800,
+  "clientHeight": 599,
+  "dpi": 96,
+  "captured": "2026-11-25",
+  "main": [
+    {
+      "name": "Planet Greenie",
+      "title": "Planet Greenie",
+      "map": "Planet Greenie",
+      "image": "World_main_PlanetGreenie.png",
+      "width": 117,
+      "height": 14,
+      "frame": "clean-main-02-client.png",
+      "crop": [
+        621,
+        216,
+        738,
+        230
+      ]
+    },
+    {
+      "name": "Walled City",
+      "title": "Walled City",
+      "map": "Walled City",
+      "image": "World_main_WalledCity.png",
+      "width": 91,
+      "height": 14,
+      "frame": "main-top-client.png",
+      "crop": [
+        621,
+        272,
+        712,
+        286
+      ]
+    },
+    {
+      "name": "Snowy Town",
+      "title": "Snowy Town",
+      "map": "Snowy Town",
+      "image": "World_main_SnowyTown.png",
+      "width": 96,
+      "height": 14,
+      "frame": "main-top-client.png",
+      "crop": [
+        621,
+        325,
+        717,
+        339
+      ]
+    },
+    {
+      "name": "Sand Village",
+      "title": "Sand Village",
+      "map": "Sand Village",
+      "image": "World_main_SandVillage.png",
+      "width": 97,
+      "height": 14,
+      "frame": "main-top-client.png",
+      "crop": [
+        621,
+        379,
+        718,
+        393
+      ]
+    },
+    {
+      "name": "Navy Bay",
+      "title": "Navy Bay",
+      "map": "Navy Bay",
+      "image": "World_main_NavyBay.png",
+      "width": 80,
+      "height": 14,
+      "frame": "main-02-client.png",
+      "crop": [
+        621,
+        233,
+        701,
+        247
+      ]
+    },
+    {
+      "name": "Fiend City",
+      "title": "Fiend City",
+      "map": "Fiend City",
+      "image": "World_main_FiendCity.png",
+      "width": 81,
+      "height": 14,
+      "frame": "main-02-client.png",
+      "crop": [
+        621,
+        287,
+        702,
+        301
+      ]
+    },
+    {
+      "name": "Spirit World",
+      "title": "Spirit World",
+      "map": "Spirit World",
+      "image": "World_main_SpiritWorld.png",
+      "width": 77,
+      "height": 14,
+      "frame": "main-02-client.png",
+      "crop": [
+        621,
+        341,
+        715,
+        355
+      ]
+    },
+    {
+      "name": "Ant Kingdom",
+      "title": "Ant Kingdom",
+      "map": "Ant Kingdom",
+      "image": "World_main_AntKingdom.png",
+      "width": 104,
+      "height": 14,
+      "frame": "verify3-main-2-client.png",
+      "crop": [
+        621,
+        394,
+        725,
+        408
+      ]
+    },
+    {
+      "name": "Magic Town",
+      "title": "Magic Town",
+      "map": "Magic Town",
+      "image": "World_main_MagicTown.png",
+      "width": 96,
+      "height": 14,
+      "frame": "main-03-client.png",
+      "crop": [
+        621,
+        249,
+        717,
+        263
+      ]
+    },
+    {
+      "name": "Haunted Academy",
+      "title": "Haunted Academy",
+      "map": "Haunted Academy",
+      "image": "World_main_HauntedAcademy.png",
+      "width": 135,
+      "height": 14,
+      "frame": "main-03-client.png",
+      "crop": [
+        621,
+        303,
+        756,
+        317
+      ]
+    },
+    {
+      "name": "Magic Hills",
+      "title": "Magic Hills",
+      "map": "Magic Hills",
+      "image": "World_main_MagicHills.png",
+      "width": 90,
+      "height": 14,
+      "frame": "main-03-client.png",
+      "crop": [
+        621,
+        358,
+        711,
+        372
+      ]
+    },
+    {
+      "name": "Space Center",
+      "title": "Space Center",
+      "map": "Space Center",
+      "image": "World_main_SpaceCenter.png",
+      "width": 104,
+      "height": 14,
+      "frame": "main-03-client.png",
+      "crop": [
+        621,
+        412,
+        725,
+        426
+      ]
+    },
+    {
+      "name": "Alien Spaceship",
+      "title": "Alien Spaceship",
+      "map": "Alien Spaceship",
+      "image": "World_main_AlienSpaceship.png",
+      "width": 122,
+      "height": 14,
+      "frame": "main-04-client.png",
+      "crop": [
+        621,
+        266,
+        743,
+        280
+      ]
+    },
+    {
+      "name": "Fabled Kingdom",
+      "title": "Fabled Kingdom",
+      "map": "Fabled Kingdom",
+      "image": "World_main_FabledKingdom.png",
+      "width": 127,
+      "height": 14,
+      "frame": "main-04-client.png",
+      "crop": [
+        621,
+        319,
+        748,
+        333
+      ]
+    },
+    {
+      "name": "Ruined City",
+      "title": "Ruined City",
+      "map": "Ruined City",
+      "image": "World_main_RuinedCity.png",
+      "width": 94,
+      "height": 14,
+      "frame": "main-04-client.png",
+      "crop": [
+        621,
+        373,
+        715,
+        387
+      ]
+    },
+    {
+      "name": "Puppet Island",
+      "title": "Puppet Island",
+      "map": "Puppet Island",
+      "image": "World_main_PuppetIsland.png",
+      "width": 108,
+      "height": 14,
+      "frame": "main-05-client.png",
+      "crop": [
+        621,
+        228,
+        729,
+        242
+      ]
+    },
+    {
+      "name": "Virtual Dungeon",
+      "title": "Virtual Dungeon",
+      "map": "Virtual Dungeon",
+      "image": "World_main_VirtualDungeon.png",
+      "width": 128,
+      "height": 14,
+      "frame": "main-05-client.png",
+      "crop": [
+        621,
+        282,
+        749,
+        296
+      ]
+    },
+    {
+      "name": "Snowy Kingdom",
+      "title": "Snowy Kingdom",
+      "map": "Snowy Kingdom",
+      "image": "World_main_SnowyKingdom.png",
+      "width": 77,
+      "height": 14,
+      "frame": "main-05-client.png",
+      "crop": [
+        621,
+        336,
+        747,
+        350
+      ]
+    },
+    {
+      "name": "Dungeon Throne",
+      "title": "Dungeon Throne",
+      "map": "Dungeon Throne",
+      "image": "World_main_DungeonThrone.png",
+      "width": 128,
+      "height": 14,
+      "frame": "main-05-client.png",
+      "crop": [
+        621,
+        390,
+        749,
+        404
+      ]
+    },
+    {
+      "name": "Mountain Temple",
+      "title": "Mountain Temple",
+      "map": "Mountain Temple",
+      "image": "World_main_MountainTemple.png",
+      "width": 132,
+      "height": 14,
+      "frame": "main-06-client.png",
+      "crop": [
+        621,
+        283,
+        753,
+        297
+      ]
+    },
+    {
+      "name": "Rain Village",
+      "title": "Rain Village",
+      "map": "Rain Village",
+      "image": "World_main_RainVillage.png",
+      "width": 77,
+      "height": 14,
+      "frame": "main-06-client.png",
+      "crop": [
+        621,
+        338,
+        721,
+        352
+      ]
+    },
+    {
+      "name": "Shibuya District",
+      "title": "Shibuya District",
+      "map": "Shibuya District",
+      "image": "World_main_ShibuyaDistrict.png",
+      "width": 125,
+      "height": 14,
+      "frame": "main-06-client.png",
+      "crop": [
+        621,
+        391,
+        746,
+        405
+      ]
+    }
+  ],
+  "legend": [
+    {
+      "name": "Magic Hills",
+      "title": "Magic Hills (Elf Invasion)",
+      "map": "Magic Hills",
+      "image": "World_legend_MagicHills.png",
+      "width": 152,
+      "height": 14,
+      "frame": "legend-03-client.png",
+      "crop": [
+        621,
+        218,
+        773,
+        232
+      ],
+      "acts": 3
+    },
+    {
+      "name": "Spirit Invasion",
+      "title": "Spirit Invasion",
+      "map": "Spirit World",
+      "image": "World_legend_SpiritInvasion.png",
+      "width": 113,
+      "height": 14,
+      "frame": "legend-03-client.png",
+      "crop": [
+        621,
+        269,
+        734,
+        283
+      ],
+      "acts": 6
+    },
+    {
+      "name": "Space Center",
+      "title": "Space Center",
+      "map": "Space Center",
+      "image": "World_legend_SpaceCenter.png",
+      "width": 106,
+      "height": 14,
+      "frame": "legend-03-client.png",
+      "crop": [
+        621,
+        320,
+        727,
+        334
+      ],
+      "acts": 3
+    },
+    {
+      "name": "Fabled Kingdom",
+      "title": "Fabled Kingdom (Generals)",
+      "map": "Fabled Kingdom",
+      "image": "World_legend_FabledKingdom.png",
+      "width": 154,
+      "height": 14,
+      "frame": "legend-03-client.png",
+      "crop": [
+        621,
+        371,
+        775,
+        385
+      ],
+      "acts": 3
+    },
+    {
+      "name": "Ruined City",
+      "title": "Ruined City (Midnight)",
+      "map": "Ruined City",
+      "image": "World_legend_RuinedCity.png",
+      "width": 154,
+      "height": 14,
+      "frame": "legend-03-client.png",
+      "crop": [
+        621,
+        423,
+        775,
+        437
+      ],
+      "acts": 6
+    },
+    {
+      "name": "Virtual Dungeon",
+      "title": "Virtual Dungeon (Bosses)",
+      "map": "Virtual Dungeon",
+      "image": "World_legend_VirtualDungeon.png",
+      "width": 154,
+      "height": 14,
+      "frame": "legend-04-client.png",
+      "crop": [
+        621,
+        290,
+        775,
+        304
+      ],
+      "acts": 3
+    },
+    {
+      "name": "Dungeon Throne",
+      "title": "Dungeon Throne",
+      "map": "Dungeon Throne",
+      "image": "World_legend_DungeonThrone.png",
+      "width": 131,
+      "height": 14,
+      "frame": "legend-04-client.png",
+      "crop": [
+        621,
+        344,
+        752,
+        358
+      ],
+      "acts": 3
+    },
+    {
+      "name": "Rain Village",
+      "title": "Rain Village",
+      "map": "Rain Village",
+      "image": "World_legend_RainVillage.png",
+      "width": 101,
+      "height": 14,
+      "frame": "legend-04-client.png",
+      "crop": [
+        621,
+        395,
+        722,
+        409
+      ],
+      "acts": 3
+    }
+  ]
+}

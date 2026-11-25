@@ -1,11 +1,11 @@
 ﻿; Shared OCR primitive used by CAPTCHA, unit panels and cards.
 ; Existing text API keeps its defaults; result API also supports neutral-white UI ink.
 
-ReadHighContrastText(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false) {
-    return ReadHighContrastResult(x,y,w,h,scale,sourceDC,greenOnly).Text
+ReadHighContrastText(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false, whiteOnly := false, goldOnly := false) {
+    return ReadHighContrastResult(x,y,w,h,scale,sourceDC,greenOnly,whiteOnly,goldOnly).Text
 }
 
-ReadHighContrastResult(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false, whiteOnly := false) {
+ReadHighContrastResult(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false, whiteOnly := false, goldOnly := false) {
     if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || scale <= 0 || scale > 6)
         throw ValueError("Invalid OCR rectangle")
     screenDC := 0, memoryDC := 0, bitmap := 0, previous := 0
@@ -43,6 +43,12 @@ ReadHighContrastResult(x, y, w, h, scale := 3, sourceDC := 0, greenOnly := false
                 red := (pixel >> 16) & 255
                 blue := pixel & 255
                 bright := green >= 135 && green - red >= 65 && green - blue >= 30
+            }
+            if goldOnly {
+                red := (pixel >> 16) & 255
+                green := (pixel >> 8) & 255
+                blue := pixel & 255
+                bright := red > 130 && green > 85 && blue < 150 && red > blue * 1.4
             }
             NumPut("UInt", bright ? 0xFF000000 : 0xFFFFFFFF, bits, offset)
         }

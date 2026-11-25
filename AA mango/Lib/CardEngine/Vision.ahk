@@ -22,23 +22,6 @@ CardVisualVisible(force := false) {
     return false
 }
 
-ColorNear(c1, c2, tol) {
-    return Abs(((c1 >> 16) & 0xFF) - ((c2 >> 16) & 0xFF)) <= tol
-        && Abs(((c1 >> 8) & 0xFF) - ((c2 >> 8) & 0xFF)) <= tol
-        && Abs((c1 & 0xFF) - (c2 & 0xFF)) <= tol
-}
-
 CardScreenVisible(force := false) {
     return CardVisualVisible(force)
-}
-
-CardSlotOf(x) {
-    global CARD_STRIP
-
-    w := CARD_STRIP.x2 - CARD_STRIP.x1
-    if (w <= 0)
-        return 0
-
-    idx := Floor(x / (w / 3)) + 1
-    return (idx >= 1 && idx <= 3) ? idx : 0
 }

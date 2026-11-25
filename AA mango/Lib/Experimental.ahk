@@ -1,8 +1,7 @@
-﻿; Smart placement and other opt-in helpers.
+﻿; Experimental code is local to DEV. No PROD files or settings are written.
 global SmartPlacementColor := -1
 global SummerMinimumPlayers := 4
 try SmartPlacementColor := Integer(IniRead(A_ScriptDir "\Settings\SmartPlacement.ini", "Preview", "Color", "-1"))
-global SmartPlacementState := Map()
 global SmartPreviewReference := 0
 global SmartHillRegions := 0, SmartHillBefore := 0, SmartHillRevision := 0
 
@@ -40,68 +39,126 @@ CalibrateSmartPlacement(*) {
     }
 }
 
-GenerateSmartPoints(&scale := 0, slot := 0) {
+GenerateSmartPoints(&scale := 0, slot := 0, phase := "") {
     global rblxID
+    scale := 0
     try WinGetClientPos(,, &cw, &ch, rblxID)
-    catch {
-        ProcessLog("Smart: client geometry unavailable; stopping candidate search")
+    catch
         return []
-    }
     if cw <= 0 || ch <= 0
         return []
-    minX := Ceil(cw * 0.12), maxX := Floor(cw * 0.88)
-    minY := Ceil(ch * 0.22), maxY := Floor(ch * 0.78)
-    if minX > maxX || minY > maxY
-        return []
     scale := {x: cw / 800, y: ch / 599}
+    bounds := SmartPlacementBounds(cw, ch)
+    center := {x: cw / 2, y: ch * 0.55}
+    kind := slot >= 1 && slot <= 6 ? GetUnitPlacementType(slot) : "Ground"
     points := []
-    ; Standard placement camera: feet project slightly below the client center.
-    ; Ground/Farm/Hybrid stay local even after exhausting a batch. Only Hill
-    ; expands beyond the player's immediate surroundings to seek platforms.
-    centerX := cw/2, centerY := ch*0.55
-    kind := slot >= 1 && slot <= 6 ? GetUnitPlacementType(slot) : ""
-    hill := kind = "Hill"
-    ; Rings are [inner, outer] pairs in reference pixels. Ground/Farm/Hybrid stay
-    ; local; only Hill expands beyond the player's immediate surroundings.
-    ; Farm walks the widest ring first and works inward, so farms fill the
-    ; outside of the placement area instead of hugging the player.
-    bands := [[0,24],[24,48],[48,72],[72,96]]
-    if hill
-        bands := [[0,24],[24,48],[48,72],[72,96],[96,175],[175,250],[250,400]]
-    else if kind = "Farm"
-        bands := [[72,96],[48,72],[24,48],[0,24]]
-    for band in bands {
-        inner := band[1], outer := band[2]
-        added := 0
-        loop 160 {
-            radius := Sqrt(Random(inner*inner, outer*outer))
-            angle := Mod(A_Index, 2) ? Random(0,359) : Random(0,3)*90 + Random(-10,10)
-            angle *= 0.0174532925199433
-            point := {x: Round(centerX + Cos(angle)*radius*scale.x), y: Round(centerY + Sin(angle)*radius*scale.y)}
-            actualRadius2 := ((point.x-centerX)/scale.x)**2 + ((point.y-centerY)/scale.y)**2
-            if actualRadius2 > outer*outer || actualRadius2 < inner*inner
-                continue
-            if point.x < minX || point.x > maxX || point.y < minY || point.y > maxY
-                continue
-            if SmartPlacementTooClose(points, point, scale, outer <= 48 ? 8 : outer <= 110 ? 12 : 24)
-                continue
-            points.Push(point)
-            if ++added >= 8
-                break
-        }
-    }
-    if hill {
-        hints := SmartHillRegionPoints(slot)
-        if hints.Length {
-            ordered := hints.Clone()
-            for point in points {
-                if !SmartPlacementTooClose(ordered, point, scale, 8)
-                    ordered.Push(point)
+    seen := Map()
+    turn := 2 * ACos(-1)
+    if kind = "Farm" {
+        ; Start with the largest full circle that fits the existing preview ROI.
+        radius := Floor(Min((center.x - bounds.left) / scale.x, (bounds.right - center.x) / scale.x,
+            (center.y - bounds.top) / scale.y, (bounds.bottom - center.y) / scale.y))
+        while radius > 0 {
+            count := Max(1, Ceil(turn * radius / 12))
+            loop count {
+                angle := (A_Index - 1) * turn / count
+                SmartAppendPoint(points, seen, center, scale, bounds, radius, angle)
             }
-            return ordered
+            radius -= 12
+        }
+        SmartAppendPoint(points, seen, center, scale, bounds, 0, 0)
+    } else if kind = "Ground" || phase = "spiral" {
+        ; One continuous spiral per slot, with a 24 px pitch and 8 px sampling.
+        pitch := 24 / turn
+        angle := 0.0
+        while (radius := pitch * angle) <= 96 {
+            SmartAppendPoint(points, seen, center, scale, bounds, radius, angle, 96)
+            angle += 8 / Sqrt(radius**2 + pitch**2)
         }
     }
     return points
+}
+
+SmartPlacementBounds(cw, ch) {
+    return {left: Ceil(cw * 0.12), right: Floor(cw * 0.88),
+        top: Ceil(ch * 0.22), bottom: Floor(ch * 0.78)}
+}
+
+SmartReadSelectedCount(slot) {
+    global rblxID
+    ; Slot fractions are visible above the selected hotbar card.
+    static centers := [239, 304, 368, 432, 497, 560]
+    if slot < 1 || slot > centers.Length || SmartPreviewInterrupted(true)
+        return ""
+    view := SmartPlacementGeometry()
+    try {
+        WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+        sx := cw / 800, sy := ch / 599
+        text := OCR.FromRect(cx + Round((centers[slot] - 26) * sx), cy + Round(502 * sy),
+            Round(52 * sx), Round(24 * sy), "en-US", 3).Text
+        if SmartPreviewInterrupted(true) || SmartPlacementGeometry() != view
+            return ""
+        if RegExMatch(Trim(text), "^(\d{1,2})\s*/\s*([1-9]\d?)$", &count)
+            && Integer(count[1]) <= Integer(count[2])
+            return Integer(count[1])
+    }
+    return ""
+}
+
+SmartAppendPoint(points, seen, center, scale, bounds, radius, angle, maxRadius := 0) {
+    x := Round(center.x + Cos(angle) * radius * scale.x)
+    y := Round(center.y + Sin(angle) * radius * scale.y)
+    if x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom
+        return
+    if maxRadius && ((x - center.x) / scale.x)**2 + ((y - center.y) / scale.y)**2 > maxRadius**2
+        return
+    key := x "," y
+    if !seen.Has(key) {
+        seen[key] := true
+        points.Push({x: x, y: y})
+    }
+}
+
+SmartScanGreenPoints(slot, physicalKey := false, geometry := "") {
+    if SmartPreviewInterrupted(true) || !UnitActionAllowed()
+        return "interrupted"
+    SendEvent("q")
+    if !CloseUnitPanel() || SmartPreviewInterrupted(true) || !UnitActionAllowed()
+        return "interrupted"
+    before := SmartHillCaptureGrid()
+    if !IsObject(before) || (geometry != "" && SmartPlacementGeometry() != geometry)
+        return "interrupted"
+    try {
+        if !SmartPressSlotKey(slot, physicalKey)
+            return "interrupted"
+        after := SmartHillCaptureGrid()
+        if !IsObject(after) || after.view != before.view || !SmartHillScanStable(before, after)
+            return "interrupted"
+        points := SmartHillBuildRegions(before, after)
+        ; A stable scan with no selected-slot marker cannot exhaust Hybrid's green phase.
+        if !points.Length && GetUnitPlacementType(slot) = "Hybrid" && SmartReadSelectedCount(slot) = ""
+            return "unreadable"
+        return points
+    } finally {
+        if !SmartPreviewInterrupted(true) && UnitActionAllowed()
+            SendEvent("q")
+    }
+}
+
+SmartHillScanStable(before, after) {
+    ; Ignore the preview itself, but reject movement in the rest of the arena.
+    if before.colors.Length != after.colors.Length
+        return false
+    compared := 0
+    changed := 0
+    for index, color in after.colors {
+        if SmartHillGreen(color)
+            continue
+        compared++
+        if SmartHillColorDelta(color, before.colors[index]) > 100
+            changed++
+    }
+    return changed <= compared * 0.30
 }
 
 SmartHillCaptureGrid() {
@@ -113,8 +170,9 @@ SmartHillCaptureGrid() {
         WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
         if cw <= 0 || ch <= 0
             return 0
-        left := Ceil(cw*.12), top := Ceil(ch*.22)
-        w := Floor(cw*.88)-left+1, h := Floor(ch*.78)-top+1
+        bounds := SmartPlacementBounds(cw, ch)
+        left := bounds.left, top := bounds.top
+        w := bounds.right - left + 1, h := bounds.bottom - top + 1
         stepX := Max(1,Round(12*cw/800)), stepY := Max(1,Round(12*ch/599))
         screen := DllCall("GetDC", "Ptr", 0, "Ptr")
         memory := DllCall("CreateCompatibleDC", "Ptr", screen, "Ptr")
@@ -251,19 +309,6 @@ SmartHillRegionVersion(slot) {
     return 0
 }
 
-SmartHillRegionPoints(slot) {
-    global SmartHillRegions
-    if !SmartHillRegionVersion(slot)
-        return []
-    points := SmartHillRegions.points.Clone()
-    ; Randomize within the mask so one edge is not tested first on every pass.
-    loop points.Length {
-        index := Random(A_Index,points.Length)
-        temp := points[A_Index], points[A_Index] := points[index], points[index] := temp
-    }
-    return points
-}
-
 SmartPlacementTooClose(points, candidate, scale, distance := 24) {
     for point in points {
         dx := (point.x - candidate.x) / scale.x
@@ -283,10 +328,10 @@ SmartPlacementGeometry() {
     return ""
 }
 
-SmartRememberPoint(points, point, temporary := false) {
+SmartRememberPoint(points, point, temporary := false, limit := 256) {
     ; Bound pass-local memory. No bitmap or OCR result is retained.
     points.Push({x: point.x, y: point.y, until: temporary ? A_TickCount + 15000 : 0})
-    if points.Length > 256
+    if points.Length > limit
         points.RemoveAt(1)
 }
 
@@ -303,8 +348,44 @@ SmartRecentPoint(points, point, scale) {
     return false
 }
 
-FindSmartPlacementPanel() {
+IsDefensePanelOpen() {
     global rblxID
+    if !WinActive(rblxID)
+        return false
+    try {
+        WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
+        if (cw <= 0 || ch <= 0)
+            return false
+        sx := cw / 800, sy := ch / 599
+        tabText := StrLower(RegExReplace(OCR.FromRect(cx + Round(144 * sx), cy + Round(233 * sy), Max(8, Round(84 * sx)), Max(8, Round(22 * sy)), "en-US", 3).Text, "[^A-Za-z]", ""))
+        if InStr(tabText, "ancient") || InStr(tabText, "defens") || InStr(tabText, "defenc")
+            return true
+        btnText := StrLower(RegExReplace(OCR.FromRect(cx + Round(76 * sx), cy + Round(378 * sy), Max(8, Round(66 * sx)), Max(8, Round(23 * sy)), "en-US", 3).Text, "[^A-Za-z]", ""))
+        if InStr(btnText, "destr") || InStr(btnText, "estroy") || InStr(btnText, "stroy")
+            return true
+    }
+    return false
+}
+
+DismissDefensePanel() {
+    global rblxID
+    if !IsDefensePanelOpen()
+        return false
+    try {
+        WinGetClientPos(,, &cw, &ch, rblxID)
+        oldM := A_CoordModeMouse
+        CoordMode "Mouse", "Client"
+        try FixClick(Round(277 * cw / 800), Round(227 * ch / 599))
+        finally CoordMode "Mouse", oldM
+        Sleep(200)
+        ProcessLog("Closed Ancient Defense panel; resuming actions")
+        return true
+    }
+    return false
+}
+
+FindSmartPlacementPanel() {
+    global rblxID, mode
     ; User-approved UPG image is primary; red X remains an alternate marker.
     ; Restrict both to the unit panel, never arbitrary dialogs elsewhere.
     static header := "|<UPGUser>FFCC00-504940$27.000000000MPs733TXyMPCQX3Mr0MP6nn3TaSMPwslaM3aDn0DkMM0s000000000U"
@@ -331,6 +412,8 @@ FindSmartPlacementPanel() {
             if !redButton
                 return false
         }
+        if ((!headerFound || (IsSet(mode) && InStr(mode, "Misty"))) && IsDefensePanelOpen())
+            return false
         WinGetClientPos(&nx, &ny, &nw, &nh, rblxID)
         return WinActive(rblxID) && nx = cx && ny = cy && nw = cw && nh = ch
     } catch {
@@ -341,13 +424,13 @@ FindSmartPlacementPanel() {
     return false
 }
 
-WaitForSmartPlacement(deadline, settleUntil := 0) {
+WaitForSmartPlacement(deadline, settleUntil := 0, geometry := "", window := 0) {
     global rblxID, mode, CARD_OFFER_ACTIVE
     ; Leave time for the final native image match and Windows timer rounding.
     scanUntil := deadline - 75
     moved := false
     while A_TickCount < scanUntil {
-        if !WinActive(rblxID)
+        if !WinActive(rblxID) || (geometry != "" && (SmartPlacementGeometry() != geometry || WinExist(rblxID) != window))
             return "uncertain"
         if mode = "Summer Event" && (CARD_OFFER_ACTIVE || CardScreenVisible(true))
             return "card-interrupted"
@@ -356,6 +439,8 @@ WaitForSmartPlacement(deadline, settleUntil := 0) {
         if !moved && A_TickCount >= settleUntil {
             try {
                 WinGetClientPos(,, &cw, &ch, rblxID)
+                if geometry != "" && (SmartPlacementGeometry() != geometry || WinExist(rblxID) != window)
+                    return "uncertain"
                 FixMove(Round(638*cw/800), Round(500*ch/599))
             }
             moved := true
@@ -369,29 +454,18 @@ WaitForSmartPlacement(deadline, settleUntil := 0) {
     return false
 }
 
-SmartPointAllowed(x, y) {
-    state:=SmartReadPreviewSample(x,y)
-    return state="blue" || state="green"
-}
-
 ResetSmartPlacementState() {
-    global SmartPlacementState,SmartPreviewReference,SmartHillRegions,SmartHillBefore
-    SmartPlacementState := Map()
+    global SmartPreviewReference,SmartHillRegions,SmartHillBefore
     SmartPreviewReference:=0
     SmartHillRegions:=0, SmartHillBefore:=0
 }
 
-SmartPointIsRed(x, y) {
-    state := SmartReadPreviewSample(x, y)
-    return state = "red" || state = "interrupted"
-}
-
-SmartCapturePreviewReference(x,y,slot:=0) {
+SmartCapturePreviewReference(x, y, slot := 0, greenOnly := false) {
     global SmartPreviewReference,SmartPreviewUnitType
     SmartPreviewReference:=0
     SmartPreviewUnitType:=slot>=1 && slot<=6 ? GetUnitPlacementType(slot) : "Ground"
-    ready := SmartReadPreviewSample(x,y,&details,true)="baseline"
-    if ready && SmartPreviewUnitType="Hill"
+    ready := SmartReadPreviewSample(x, y, &details, true, greenOnly) = "baseline"
+    if ready && SmartPreviewUnitType = "Hill" && !greenOnly
         SmartPrepareHillRegions()
     return ready
 }
@@ -415,9 +489,9 @@ SmartReadTerrainPixels(screenX,screenY,dx,dy,greenPalette,redPalette,&details) {
     details.green:=Max(details.green,details.fadedGreen)
 }
 
-SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
+SmartReadPreviewSample(x, y, &details := 0, captureReference := false, greenOnly := false) {
     global rblxID,SmartPreviewReference,SmartPreviewUnitType
-    hill:=IsSet(SmartPreviewUnitType) && SmartPreviewUnitType="Hill"
+    hill := greenOnly || (IsSet(SmartPreviewUnitType) && SmartPreviewUnitType = "Hill")
     static centerPalette:=[[0x05F469,45],[0x00FF00,30],[0x66F800,45]]
     static ringPalette:=[[0x05F469,45],[0x00FF00,30],[0x66F800,45],[0x00C200,30]]
     static fadedGreenPalette:=[[0x05F469,60],[0x00FF00,45],[0x66F800,60],[0x00C200,35]]
@@ -504,7 +578,7 @@ SmartReadPreviewSample(x, y, &details := 0, captureReference := false) {
                 && ref.hwnd=hwnd && ref.pixels.Size=w*h*4 && A_TickCount-ref.tick<=3500
             ; User rule: one observation of the local blue unit border wins
             ; over terrain green/red. No sector count, streak or second read.
-            if referenceCurrent {
+            if referenceCurrent && !greenOnly {
                 loop w*h {
                     index:=(A_Index-1)*4,color:=NumGet(bits,index,"UInt") & 0xFFFFFF
                     if !SmartPreviewColorMatches(color,cyanPalette)
@@ -646,16 +720,16 @@ SmartPreviewInterrupted(force := false) {
         || (mode = "Summer Event" && CardScreenVisible(force))
 }
 
-SmartWaitPreviewReady(x, y, timeoutMs := 1200, &details := 0) {
+SmartWaitPreviewReady(x, y, timeoutMs := 1200, &details := 0, greenOnly := false) {
     deadline := A_TickCount + timeoutMs, greens := 0, reds := 0
     details := {reason: "no-samples", green: 0, red: 0, colors: []}
     while A_TickCount < deadline {
         if SmartPreviewInterrupted()
             return "interrupted"
-        state := SmartReadPreviewSample(x, y, &details)
+        state := SmartReadPreviewSample(x, y, &details, false, greenOnly)
         if state = "interrupted"
             return state
-        if state="blue" {
+        if state = "blue" && !greenOnly {
             if SmartPreviewInterrupted(true)
                 return "interrupted"
             details.reason:="blue-border"
@@ -671,26 +745,6 @@ SmartWaitPreviewReady(x, y, timeoutMs := 1200, &details := 0) {
         Sleep(40)
     }
     return "unreadable" ; Missing/unknown/late preview is not rejected terrain.
-}
-
-SmartTerrainForSlot(slot) {
-    global SmartPlacementState
-    if !SmartPlacementState.Has(slot)
-        SmartPlacementState[slot] := {failures: 0}
-    return "Preview" ; Unit preview, rather than a tag-specific branch, decides terrain.
-}
-
-SmartRecordPlacementOutcome(slot, outcome) {
-    global SmartPlacementState
-    SmartTerrainForSlot(slot)
-    state := SmartPlacementState[slot]
-    if outcome = true {
-        state.failures := 0
-        return false
-    }
-    if outcome = false
-        state.failures++
-    return false
 }
 
 
@@ -870,49 +924,37 @@ ReturnSummerLowPlayers() {
 
 OpenRegularPlayArea() {
     global rblxID
-    if !WinActive(rblxID)
+    if !CapysGetClientBox(&cx,&cy,&cw,&ch,&window) || !WinActive(rblxID)
         return false
-    WinGetClientPos(&cx, &cy, &cw, &ch, rblxID)
-    oldMouse := A_CoordModeMouse
-    CoordMode "Mouse", "Screen"
+    if IsObject(WorldSelectorState())
+        return true
+    view := {window:window,x:cx,y:cy,w:cw,h:ch,sx:cw/800,sy:ch/599}
     try {
-        ui := OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
-        target := 0
-        try target := ui.FindString("Play Area")
-        if !IsObject(target) {
-            areas := ui.FindString("Areas")
-            if !WinActive(rblxID)
-                return false
-            FixClick(cx + Round(areas.x + areas.w/2), cy + Round(areas.y + areas.h/2))
-            deadline := A_TickCount + 5000
-            while (A_TickCount < deadline && WinActive(rblxID)) {
-                ui := OCR.FromRect(cx, cy, cw, ch, "en-US", 2)
-                try target := ui.FindString("Play Area")
-                if IsObject(target)
-                    break
-                Sleep(150)
-            }
-        }
-        if !IsObject(target) || !WinActive(rblxID) {
-            ProcessLog("Regular modes: Play Area not detected; navigation stopped")
+        if !WorldClearLobbyNotices(view)
             return false
-        }
-        FixClick(cx + Round(target.x + target.w/2), cy + Round(target.y + target.h/2))
-        ProcessLog("Regular modes: selected Areas -> Play Area")
-        deadline := A_TickCount + 8000
-        while (A_TickCount < deadline && WinActive(rblxID)) {
-            text := SummerReadUI()
-            if RegExMatch(text, "i)select\s+world|\bempty\b") {
-                ProcessLog("Regular modes: Play Area arrival confirmed")
-                return true
+        if !WorldImageFind("World_AreasTitle.png",view,[190,128,530,178],292,33) {
+            if !WorldImageFind("World_Areas.png",view,[738,448,798,510],44,16,&areaX,&areaY,90) {
+                ProcessLog("Regular modes: Areas button is not confirmed")
+                return false
             }
-            Sleep(200)
+            if !WorldClick(view,766,478)
+                return false
         }
-        ProcessLog("Regular modes: Play Area arrival not confirmed; movement skipped")
+        deadline := A_TickCount+5000
+        while A_TickCount < deadline && WorldClearLobbyNotices(view) {
+            if WorldImageFind("World_AreasTitle.png",view,[190,128,530,178],292,33)
+                && WorldImageFind("World_PlayArea.png",view,[403,286,594,370],171,32,&playX,&playY,100) {
+                if !WorldClick(view,500,334)
+                    return false
+                ProcessLog("Regular modes: selected Areas -> Play Area")
+                Sleep(600)
+                return WorldViewValid(view)
+            }
+            Sleep(150)
+        }
     } catch {
-        ProcessLog("Regular modes: Areas route could not be read; navigation stopped")
-    } finally {
-        CoordMode "Mouse", oldMouse
+        ProcessLog("Regular modes: Areas menu could not be read")
     }
+    ProcessLog("Regular modes: Play Area is not confirmed")
     return false
 }

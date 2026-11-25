@@ -7,6 +7,7 @@ SendMode "Event"
 SetWorkingDir(A_ScriptDir)
 #Include %A_ScriptDir%\lib/Image.ahk
 #Include %A_ScriptDir%\Lib\Interface\MacroAppearance.ahk
+#Include %A_ScriptDir%\Lib\WorldSelection.ahk
 #Include %A_ScriptDir%\lib/GUI.ahk
 #Include %A_ScriptDir%\lib/GameMango.ahk
 #Include %A_ScriptDir%\lib/Functions.ahk

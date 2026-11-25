@@ -25,7 +25,6 @@ Class FormData {
 
         ' . (data.hasProp("string") ? data.string . "`r`n": "")
         )
-        A_Clipboard := str
         this.utf8(str)
         if (data.hasProp("pBitmap")) {
             try {
