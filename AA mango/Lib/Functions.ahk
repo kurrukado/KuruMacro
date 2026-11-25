@@ -10,7 +10,14 @@ if (A_ScriptFullPath = A_LineFile) {
 }
 
 global settingsFile := ""
-global confirmClicked := true
+global confirmClicked := false
+
+GetModeSettingsPath(modeName) {
+    if (modeName = "")
+        return A_ScriptDir "\Settings\Configuration.txt"
+    safeMode := RegExReplace(modeName, '[\\/:*?"<>|]', "_")
+    return A_ScriptDir "\Settings\Config_" . safeMode . ".txt"
+}
 
 setupFilePath() {
     global settingsFile
@@ -54,101 +61,124 @@ GetUnitPlacementType(slot) {
 
 NormalizeUnitMaxLevel(value) {
     value := StrUpper(Trim(value, " `t`r`n"))
-    ; Migrate the previous text-box defaults without enabling a cap.
-    if (value = "OFF" || value = "MAX" || value = "" || value = "0")
-        return "OFF"
-    if RegExMatch(value, "^(?:[1-9]|1\d|20)$")
+    if (value = "" || value = "0" || value = "OFF" || value = "MAX")
+        return "MAX"
+    if RegExMatch(value, "^(?:[1-9]|10)$")
         return Integer(value) ""
-    throw ValueError("Max Level: select OFF or a level from 1 to 20")
+    return "MAX"
 }
 
 GetUnitUpgradeLimit(slot) {
     global UnitData
     if (slot < 1 || slot > UnitData.Length)
-        return 0
-    value := NormalizeUnitMaxLevel(UnitData[slot].MaxLevel.Text)
-    return value = "OFF" ? 0 : Integer(value)
+        return "MAX"
+    return NormalizeUnitMaxLevel(UnitData[slot].MaxLevel.Text)
 }
 
-readInSettings() {
+readInSettings(modeName := "") {
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
     global placement1, placement2, placement3, placement4, placement5, placement6
     global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
     global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, NextRoomBox, ReplayBox
+    global MapDropdown, StoryDropdown, StoryActDropdown, LegendDropDown, LegendActDropdown, RaidDropdown, RaidActDropdown, InfinityCastleDropdown, PortalDropdown, ModeDropdown
 
     try {
-        settingsFile := setupFilePath()
-        if !FileExist(settingsFile) {
-            return
+        if !DirExist(A_ScriptDir "\Settings")
+            DirCreate(A_ScriptDir "\Settings")
+
+        targetMode := modeName != "" ? modeName : (IsSet(ModeDropdown) && ModeDropdown.Text != "" ? ModeDropdown.Text : "")
+        targetFile := ""
+        if (targetMode != "") {
+            modePath := GetModeSettingsPath(targetMode)
+            if FileExist(modePath)
+                targetFile := modePath
         }
 
-        content := FileRead(settingsFile)
-    
+        if (targetFile = "")
+            targetFile := setupFilePath()
+
+        if !FileExist(targetFile)
+            return
+
+        content := FileRead(targetFile)
         lines := StrSplit(content, "`n")
 
         for line in lines {
-            if line = "" {
+            if line = ""
                 continue
-            }
 
             parts := StrSplit(line, "=")
-            if RegExMatch(parts[1], "^UnitType([1-6])$", &typeSlot) {
-                try UnitData[Integer(typeSlot[1])].Type.Choose(NormalizeUnitType(parts[2]))
+            if (parts.Length < 2)
+                continue
+            key := Trim(parts[1])
+            val := Trim(parts[2], " `t`r`n")
+
+            if RegExMatch(key, "^UnitType([1-6])$", &typeSlot) {
+                try UnitData[Integer(typeSlot[1])].Type.Choose(NormalizeUnitType(val))
                 catch {
-                    UnitData[Integer(typeSlot[1])].Type.Choose("Ground")
-                    ProcessLog("Unit " typeSlot[1] ": invalid saved type; using Ground")
+                    try UnitData[Integer(typeSlot[1])].Type.Choose("Ground")
                 }
                 continue
             }
-            if RegExMatch(parts[1], "^MaxLevel([1-6])$", &maxSlot) {
-                try UnitData[Integer(maxSlot[1])].MaxLevel.Text := NormalizeUnitMaxLevel(parts[2])
+            if RegExMatch(key, "^MaxLevel([1-6])$", &maxSlot) {
+                try ChooseDropdownItemByText(UnitData[Integer(maxSlot[1])].MaxLevel, NormalizeUnitMaxLevel(val))
                 continue
             }
-            switch parts[1] {
+            switch key {
                 case "Mode":
-                    mode := parts[2]
-                    try ChooseDropdownItemByText(ModeDropdown, mode)
+                    if (modeName = "") {
+                        mode := val
+                        try ChooseDropdownItemByText(ModeDropdown, mode)
+                    }
                 case "PlacementPattern":
-                    try ChooseDropdownItemByText(PlacementPatternDropdown, Trim(parts[2], " `t`r`n"))
+                    try ChooseDropdownItemByText(PlacementPatternDropdown, val)
                 case "Matchmaking":
-                    try MatchMaking.Value := Trim(parts[2], " `t`r`n") = "1"
+                    try MatchMaking.Value := val = "1"
                 case "ReturnToLobby":
-                    try ReturnLobbyBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                    try ReturnLobbyBox.Value := val = "1"
                 case "NextLevel":
-                    try NextLevelBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                    try NextLevelBox.Value := val = "1"
                 case "NextRoom":
-                    try NextRoomBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                    try NextRoomBox.Value := val = "1"
                 case "Replay":
-                    try ReplayBox.Value := Trim(parts[2], " `t`r`n") = "1"
+                    try ReplayBox.Value := val = "1"
                 case "Map":
-                    try ChooseDropdownItemByText(MapDropdown, parts[2])
-                case "Enabled1": try enabled1.Value := parts[2]
-                case "Enabled2": try enabled2.Value := parts[2]
-                case "Enabled3": try enabled3.Value := parts[2]
-                case "Enabled4": try enabled4.Value := parts[2]
-                case "Enabled5": try enabled5.Value := parts[2]
-                case "Enabled6": try enabled6.Value := parts[2]
-                case "Placement1": try placement1.Text := parts[2]
-                case "Placement2": try placement2.Text := parts[2]
-                case "Placement3": try placement3.Text := parts[2]
-                case "Placement4": try placement4.Text := parts[2]
-                case "Placement5": try placement5.Text := parts[2]
-                case "Placement6": try placement6.Text := parts[2]
-                case "Priority1": try priority1.Text := parts[2]
-                case "Priority2": try priority2.Text := parts[2]
-                case "Priority3": try priority3.Text := parts[2]
-                case "Priority4": try priority4.Text := parts[2]
-                case "Priority5": try priority5.Text := parts[2]
-                case "Priority6": try priority6.Text := parts[2]
-                case "Pos1", "pos1": try pos1.Text := parts[2]
-                case "Pos2", "pos2": try pos2.Text := parts[2]
-                case "Pos3", "pos3": try pos3.Text := parts[2]
-                case "Pos4", "pos4": try pos4.Text := parts[2]
-                case "Pos5", "pos5": try pos5.Text := parts[2]
-                case "Pos6", "pos6": try pos6.Text := parts[2]
+                    for selection in [["Infinite",MapDropdown,"main"], ["Story",StoryDropdown,"main"], ["Legend",LegendDropDown,"legend"]] {
+                        entry := WorldCardEntry(val,selection[3])
+                        if IsObject(entry)
+                            ChooseDropdownItemByText(selection[2],entry["name"])
+                        else if targetMode = selection[1]
+                            selection[2].Choose(0)
+                    }
+                    try ChooseDropdownItemByText(RaidDropdown, val)
+                    try ChooseDropdownItemByText(PortalDropdown, val)
+                case "Enabled1": try enabled1.Value := val
+                case "Enabled2": try enabled2.Value := val
+                case "Enabled3": try enabled3.Value := val
+                case "Enabled4": try enabled4.Value := val
+                case "Enabled5": try enabled5.Value := val
+                case "Enabled6": try enabled6.Value := val
+                case "Placement1": try placement1.Text := val
+                case "Placement2": try placement2.Text := val
+                case "Placement3": try placement3.Text := val
+                case "Placement4": try placement4.Text := val
+                case "Placement5": try placement5.Text := val
+                case "Placement6": try placement6.Text := val
+                case "Priority1": try priority1.Text := val
+                case "Priority2": try priority2.Text := val
+                case "Priority3": try priority3.Text := val
+                case "Priority4": try priority4.Text := val
+                case "Priority5": try priority5.Text := val
+                case "Priority6": try priority6.Text := val
+                case "Pos1", "pos1": try pos1.Text := val
+                case "Pos2", "pos2": try pos2.Text := val
+                case "Pos3", "pos3": try pos3.Text := val
+                case "Pos4", "pos4": try pos4.Text := val
+                case "Pos5", "pos5": try pos5.Text := val
+                case "Pos6", "pos6": try pos6.Text := val
             }
         }
-        ProcessLog("Configuration settings are loaded")
+        ProcessLog("Cấu hình được nạp: " (targetMode != "" ? targetMode : "mặc định"))
     }
 }
 
@@ -243,72 +273,15 @@ SaveSettings(*) {
             content .= "`nUnitType" index "=" value
 
         FileAppend(content, settingsFile)
-        ProcessLog("Configuration setting are saved")
-    }
-}
 
-LoadSettings() {
-    global UnitData, mode
-    try {
-        settingsFile := A_ScriptDir "\Settings\Configuration.txt"
-        if !FileExist(settingsFile) {
-            return
+        modeFile := GetModeSettingsPath(currMode)
+        try {
+            if FileExist(modeFile)
+                FileDelete(modeFile)
+            FileAppend(content, modeFile)
         }
-
-        content := FileRead(settingsFile)
-        sections := StrSplit(content, "`n`n")
-
-        for section in sections {
-            if (InStr(section, "Index=")) {
-                lines := StrSplit(section, "`n")
-                index := ""
-
-                for line in lines {
-                    if line = "" {
-                        continue
-                    }
-
-                    parts := StrSplit(line, "=")
-                    if (parts[1] = "Index") {
-                        index := parts[2]
-                    } else if (index && UnitData.Has(Integer(index))) {
-                        switch parts[1] {
-                            case "Enabled": UnitData[index].Enabled.Value := parts[2]
-                            case "Placement": UnitData[index].PlacementBox.Value := parts[2]
-                        }
-                    }
-                }
-            }
-        }
-        ProcessLog("Auto settings loaded successfully")
+        ProcessLog("Cấu hình đã lưu cho: " currMode)
     }
-}
-
-SaveBannerSettings(*) {
-    ProcessLog("Saving Banner Configuration")
-
-    if FileExist("Settings\BannerUnit.txt")
-        FileDelete("Settings\BannerUnit.txt")
-
-    FileAppend(BannerUnitBox.Value, "Settings\BannerUnit.txt", "UTF-8")
-}
-
-SavePsSettings(*) {
-    ProcessLog("Saving Private Server")
-
-    if FileExist("Settings\PrivateServer.txt")
-        FileDelete("Settings\PrivateServer.txt")
-
-    FileAppend(PsLinkBox.Value, "Settings\PrivateServer.txt", "UTF-8")
-}
-
-SaveUINavSettings(*) {
-    ProcessLog("Saving UI Navigation Key")
-
-    if FileExist("Settings\UINavigation.txt")
-        FileDelete("Settings\UINavigation.txt")
-
-    FileAppend(UINavBox.Value, "Settings\UINavigation.txt", "UTF-8")
 }
 
 ;Opens discord Link
@@ -341,7 +314,8 @@ getCurrentTime() {
 }
 
 OnModeChange(*) {
-    global mode
+    global mode, confirmClicked
+    confirmClicked := false
     selected := ModeDropdown.Text
 
     ; Hide all dropdowns first
@@ -398,10 +372,20 @@ OnModeChange(*) {
         ReturnLobbyBox.Visible := true
     } else if (selected = "Summer Event") {
         mode := "Summer Event"
-        try StartPaddleWorker()
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
-
+    } else if (selected = "Misty Village" || selected = "Misty Infinite") {
+        mode := selected
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    } else if (selected = "Artifacts") {
+        mode := "Artifacts"
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    } else if (selected = "Cursed Womb") {
+        mode := "Cursed Womb"
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
     } else if (selected = "Infinite") {
         MapDropdown.Visible := true
         ReturnLobbyBox.Visible := true
@@ -409,6 +393,9 @@ OnModeChange(*) {
         mode := "Infinite"
     }
     UpdateResultOptionsForMode(selected)
+    readInSettings(selected)
+    if selected = "Legend"
+        OnLegendChange()
 }
 
 OnStoryChange(*) {
@@ -420,11 +407,18 @@ OnStoryChange(*) {
 }
 
 OnLegendChange(*) {
-    if (LegendDropDown.Text != "") {
-        LegendActDropdown.Visible := true
-    } else {
-        LegendActDropdown.Visible := false
-    }
+    entry := WorldCardEntry(LegendDropDown.Text,"legend")
+    selectedAct := LegendActDropdown.Value
+    LegendActDropdown.Delete()
+    LegendActDropdown.Visible := IsObject(entry)
+    if !IsObject(entry)
+        return
+    acts := []
+    Loop entry["acts"]
+        acts.Push("Act " A_Index)
+    LegendActDropdown.Add(acts)
+    if selectedAct <= acts.Length
+        LegendActDropdown.Choose(selectedAct)
 }
 
 OnRaidChange(*) {
@@ -523,8 +517,22 @@ ConfirmModeSelection(hideSelection := true) {
         ReturnLobbyBox.Visible := true
     }
     else if (ModeDropdown.Text = "Summer Event") {
-        try StartPaddleWorker()
         ProcessLog("Selected Summer Event - result actions follow the GUI options; matchmaking returns to lobby")
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    }
+    else if (ModeDropdown.Text = "Misty Village" || ModeDropdown.Text = "Misty Infinite") {
+        ProcessLog("Selected " . ModeDropdown.Text . " mode")
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    }
+    else if (ModeDropdown.Text = "Artifacts") {
+        ProcessLog("Selected Artifacts mode")
+        MatchMaking.Visible := true
+        ReturnLobbyBox.Visible := true
+    }
+    else if (ModeDropdown.Text = "Cursed Womb") {
+        ProcessLog("Selected Cursed Womb mode")
         MatchMaking.Visible := true
         ReturnLobbyBox.Visible := true
     }
@@ -570,8 +578,11 @@ ConfirmModeSelection(hideSelection := true) {
         modeSelectionGroup.Visible := false
         Hotkeytext.Visible := true
         Hotkeytext2.Visible := true
+        global confirmClicked := true
+        SaveSettings()
+    } else {
+        global confirmClicked := false
     }
-    global confirmClicked := true
 }
 
 UpdateResultOptionsForMode(selectedMode) {
@@ -677,23 +688,6 @@ SaveKeybindSettings(*) {
     Hotkey(F4Key, (*) => TogglePause())
 }
 
-LoadKeybindSettings() {
-    if FileExist("Settings\Keybinds.txt") {
-        fileContent := FileRead("Settings\Keybinds.txt", "UTF-8")
-        loop parse, fileContent, "`n" {
-            parts := StrSplit(A_LoopField, "=")
-            if (parts[1] = "F1")
-                global F1Key := parts[2]
-            else if (parts[1] = "F2")
-                global F2Key := parts[2]
-            else if (parts[1] = "F3")
-                global F3Key := parts[2]
-            else if (parts[1] = "F4")
-                global F4Key := parts[2]
-        }
-    }
-}
-
 ToggleSaveChestsForBoss(*) {
     global SaveChestsForBoss
     SaveChestsForBoss := !SaveChestsForBoss
@@ -712,6 +706,12 @@ GetCurrentMapName() {
         return IsSet(MansionMapName) ? MansionMapName : ""
     if (IsSet(ModeDropdown) && ModeDropdown.Text = "Summer Event")
         return IsSet(SummerMapName) ? SummerMapName : ""
+    if (IsSet(ModeDropdown) && (ModeDropdown.Text = "Misty Village" || ModeDropdown.Text = "Misty Infinite"))
+        return "Misty Village"
+    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Artifacts")
+        return "Artifacts"
+    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Cursed Womb")
+        return "Cursed Womb"
     if (IsSet(MapDropdown) && MapDropdown.Visible && MapDropdown.Text != "")
         return MapDropdown.Text
     if (IsSet(StoryDropdown) && StoryDropdown.Visible && StoryDropdown.Text != "")
@@ -958,6 +958,13 @@ LoadUnitCoordsFromFile() {
                     break
             }
         }
+    }
+
+    ; Misty Infinite shares the same map and coordinates as Misty Village.
+    if (!FileExist(filePath) && GetCurrentModeName() = "Misty Infinite") {
+        candidate := A_ScriptDir "\Settings\Misty Village_Misty Village.txt"
+        if FileExist(candidate)
+            filePath := candidate
     }
 
     if !IsSet(UnitPlacements)

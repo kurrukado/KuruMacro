@@ -11,7 +11,7 @@ if (A_ScriptFullPath = A_LineFile) {
 
 ; Basic Application Info
 global aaTitle := "KuruMacro Anime Adventures "
-global version := "v4.2"
+global version := "v5"
 global rblxID := "ahk_exe RobloxPlayerBeta.exe"
 ;Coordinate and Positioning Variables
 global targetWidth := 816
@@ -54,8 +54,6 @@ uiTheme.Push("0xFF00FE")  ; Reserved viewport chroma key; never use text/black h
 uiTheme.Push("0x000000")  ; Textbox color
 uiTheme.Push("0x92EEAA")  ; HighLight
 ;Logs/Save settings
-global settingsGuiOpen := false
-global SettingsGUI := ""
 global currentOutputFile := A_ScriptDir "\Logs\LogFile.txt"
 global WebhookURLFile := "Settings\WebhookURL.txt"
 global DiscordUserIDFile := "Settings\DiscordUSERID.txt"
@@ -100,13 +98,12 @@ global ProcessRows := []
 Loop 32 {
     color := A_Index = 1 ? uiTheme[7] : uiTheme[1]
     row := aaMainUI.Add("Text", "x1297 y74 w320 h28 Hidden +0x80 Background" uiTheme[2] " c" color,
-        A_Index = 1 ? "➤ Made by KuruMacro" : "")
+        A_Index = 1 ? "➤ Sẵn sàng" : "")
     row.SetFont("Bold s" (A_Index = 1 ? 12 : 10), "Segoe UI")
     ProcessRows.Push(row)
 }
 global ProcessTimeline := 0
 try ProcessTimeline := KuruTimeline(aaMainUI, 1287, 64, 340, 565)
-LoadRecentProcessHistory()
 WinSetTransColor(uiTheme[5], aaMainUI) ;Roblox window box
 
 ;--------------SETTINGS;--------------SETTINGS;--------------SETTINGS;--------------SETTINGS;--------------SETTINGS;--------------SETTINGS;--------------SETTINGS
@@ -135,8 +132,9 @@ OpenConfigPopup(kind, *) {
             }
             popup.Add("Button", "x210 y175 w105 h28", "Save").OnEvent("Click", SaveKeybindSettings)
             popup.SetFont("Bold s9 c" uiTheme[1])
+            popup.Add("Text", "x18 y218 w305 h65", "Fixed DEV shortcuts:`nF5: Vote probe`nF9/F10/F11/F12: A/D/W/S movement pulses")
             KuruButtons.Apply(popup)
-            KuruMotion.Open(popup, "w340 h225")
+            KuruMotion.Open(popup, "w340 h300")
         case "Discord":
             popup.Add("Text", "x18 y18", "Webhook URL")
             global WebhookURLBox := popup.Add("Edit", "x18 y45 w370 h24 Password c" uiTheme[6])
@@ -149,33 +147,13 @@ OpenConfigPopup(kind, *) {
                 DiscordUserIDBox.Value := FileRead(DiscordUserIDFile, "UTF-8")
             if FileExist(SendActivityLogsFile)
                 SendActivityLogsBox.Value := Trim(FileRead(SendActivityLogsFile, "UTF-8")) = "1"
-            popup.Add("Button", "x278 y150 w110 h28", "Save").OnEvent("Click", (*) => SaveWebhookSettings())
+            popup.Add("Button", "x170 y150 w95 h28", "Test").OnEvent("Click", (*) => (SaveWebhookSettings(false), TestWebhook()))
+            popup.Add("Button", "x278 y150 w110 h28", "Save").OnEvent("Click", (*) => SaveWebhookSettings(true))
             KuruButtons.Apply(popup)
             KuruMotion.Open(popup, "w410 h200")
     }
 }
 
-
-OpenGuide(*) {
-    GuideGUI := Gui("+AlwaysOnTop")
-    GuideGUI.SetFont("s10 bold", "Segoe UI")
-    GuideGUI.Title := "Anime adventures settings"
-
-    GuideGUI.BackColor := "0c000a"
-    GuideGUI.MarginX := 20
-    GuideGUI.MarginY := 20
-
-    ; Add Guide content
-    GuideGUI.SetFont("s16 bold", "Segoe UI")
-    GuideGUI.Add("Text", "x0 w800 cWhite +Center", "1 - Chỉnh lại setting trong game như sau:")
-    GuideGUI.Add("Picture", "x100 w600 h160 cWhite +Center", "Images\aasettings.png")
-    GuideGUI.Add("Text", "x0 w800 cWhite +Center", "2 - Nhớ chỉnh Graphics về thành 1")
-    GuideGUI.Add("Picture", "x50 w700   cWhite +Center", "Images\Clicktomove.png")
-    GuideGUI.Add("Picture", "x50 w700   cWhite +Center", "Images\graphics1.png")
-    GuideGUI.Add("Text", "x0 w800 cWhite +Center", "3 - Ko ưu tiên Hill units, ưu tiên Hybird")
-    GuideGUI.Add("Text", "x0 w800 cWhite +Center", "4 - Vào lại game, đừng di chuyển camera và bấm F2 để bắt đầu")
-    GuideGUI.Show("w800")
-}
 
 aaMainUI.SetFont("s12 Bold c" uiTheme[1])
 placementSaveBtn := aaMainUI.Add("Button", "x818 y515 w80 h24", "Save")
@@ -193,8 +171,8 @@ ReturnLobbyBox.OnEvent("Click", (*) => UpdateResultOptionsForMode(ModeDropdown.T
 global AutoAbilityBox := aaMainUI.Add("CheckBox", "x920 y515 w120 h22 c0xb5b3b3 Checked", "Auto Ability")
 global PriorityUpgrade := aaMainUI.Add("CheckBox", "x1045 y515 w145 h22 c0xb5b3b3", "Priority Upgrade")
 global SaveChestsBox := aaMainUI.Add("CheckBox", "x818 y545 w280 h22 c0xb5b3b3 Checked", "Save Chests For Rukia")
-global PlacementPatternDropdown := aaMainUI.Add("DropDownList", "x1200 y530 w140 h180 Choose1 +Center", ["Circle", "Random", "Grid", "Smart"])
-PlacementPatternText := aaMainUI.Add("Text", "x1200 y510 w145 h20", "Placement type")
+global PlacementPatternDropdown := aaMainUI.Add("DropDownList", "x1200 y530 w140 h180 Choose1 +Center Hidden", ["Capys"])
+PlacementPatternText := aaMainUI.Add("Text", "x1200 y510 w145 h20 Hidden", "Placement type")
 placementSaveText := aaMainUI.Add("Text", "x818 y470 w90 h16", "Save Config")
 Hotkeytext := aaMainUI.Add("Text", "x807 y35 w530 h30", "Configure keybinds in the Settings panel below ")
 Hotkeytext2 := aaMainUI.Add("Text", "x807 y50 w530 h30", "F1: Chỉnh lại cửa sổ Roblox || F2: Bắt đầu Macro || F3: Thoát Macro || F4: Dừng/Tiếp tục Macro")
@@ -202,13 +180,13 @@ Hotkeytext2 := aaMainUI.Add("Text", "x807 y50 w530 h30", "F1: Chỉnh lại cử
 ;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT;--------------MODE SELECT
 global modeSelectionGroup := aaMainUI.Add("GroupBox", "x808 y38 w500 h45 Background" uiTheme[2], "Chọn chế độ")
 aaMainUI.SetFont("Bold s10 c" uiTheme[6])
-global ModeDropdown := aaMainUI.Add("DropDownList", "x818 y53 w140 h240 Choose1 +Center", ["Infinite", "Story", "Portal", "Daily Infinite Quest", "Farm", "Legend", "Raid", "Infinity Castle", "Dungeon", "Summer Event", "Infinity Mansion"])
-global MapDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose1 +Center", ["Planet Greenie", "Walled City", "Snowy Town", "Sand Village", "Navy Bay", "Fiend City", "Spirit World", "Ant Kingdom", "Magic Town", "Haunted Academy", "Magic Hills", "Space Center", "Alien Spaceship", "Fabled Kingdom", "Ruined City", "Puppet Island", "Virtual Dungeon", "Snowy Kingdom", "Dungeon Throne", "Mountain Temple", "Rain Village", "Shibuya District", "Ninja Forest", "Marine Base", "Hollowed Moon"])
-global StoryDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose0 +Center", ["Planet Greenie", "Walled City", "Snowy Town", "Sand Village", "Navy Bay", "Fiend City", "Spirit World", "Ant Kingdom", "Magic Town", "Haunted Academy", "Magic Hills", "Space Center", "Alien Spaceship", "Fabled Kingdom", "Ruined City", "Puppet Island", "Virtual Dungeon", "Snowy Kingdom", "Dungeon Throne", "Mountain Temple", "Rain Village", "Shibuya District"])
+global ModeDropdown := aaMainUI.Add("DropDownList", "x818 y53 w140 h240 Choose1 +Center", ["Infinite", "Story", "Portal", "Daily Infinite Quest", "Farm", "Legend", "Raid", "Infinity Castle", "Dungeon", "Summer Event", "Infinity Mansion", "Misty Village", "Misty Infinite", "Artifacts", "Cursed Womb"])
+global MapDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose1 +Center", WorldMapNames("main"))
+global StoryDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose0 +Center", WorldMapNames("main"))
 global StoryActDropdown := aaMainUI.Add("DropDownList", "x1128 y53 w80 h180 Choose0 +Center", ["Act 1", "Act 2", "Act 3", "Act 4", "Act 5", "Act 6", "Infinity"])
 global PortalDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose0 +Center", ["Shibuya District", "Demons Leader Place"])
-global LegendDropDown := aaMainUI.Add("DropDownlist", "x968 y53 w150 h180 Choose0 +Center", ["Magic Hills", "Space Center", "Fabled Kingdom", "Virtual Dungeon", "Dungeon Throne", "Rain Village"])
-global LegendActDropdown := aaMainUI.Add("DropDownList", "x1128 y53 w80 h180 Choose0 +Center", ["Act 1", "Act 2", "Act 3"])
+global LegendDropDown := aaMainUI.Add("DropDownlist", "x968 y53 w150 h180 Choose0 +Center", WorldMapNames("legend"))
+global LegendActDropdown := aaMainUI.Add("DropDownList", "x1128 y53 w80 h180 +Center", [])
 global RaidDropdown := aaMainUI.Add("DropDownList", "x968 y53 w150 h180 Choose0 +Center", ["Sacred Planet", "Strange Town", "Ruined City"])
 global RaidActDropdown := aaMainUI.Add("DropDownList", "x1128 y53 w80 h180 Choose0 +Center", ["Act 1", "Act 2", "Act 3", "Act 4", "Act 5"])
 global InfinityCastleDropdown := aaMainUI.Add("DropDownList", "x968 y53 w80 h180 Choose0 +Center", ["Normal", "Hard"])
@@ -263,10 +241,8 @@ AddUnitCard(aaMainUI, index, x, y) {
     unit.LimitText := aaMainUI.Add("Text", "x988 y89 w72 h20 BackgroundTrans" hidden, "Max Level")
     unit.TypeText := aaMainUI.Add("Text", "x1078 y89 w100 h20 BackgroundTrans" hidden, "Type")
     unit.PosText := aaMainUI.Add("Text", "x1200 y89 w60 h20 BackgroundTrans" hidden, "Position")
-    maxLevels := ["OFF"]
-    Loop 20
-        maxLevels.Push(A_Index "")
-    unit.MaxLevel := aaMainUI.Add("DropDownList", "x988 y" (y + 5) " w72 h260 Choose1", maxLevels)
+    maxLevels := ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "MAX"]
+    unit.MaxLevel := aaMainUI.Add("DropDownList", "x988 y" (y + 5) " w72 h260 Choose11", maxLevels)
     unit.Type := aaMainUI.Add("DropDownList", "x1078 y" (y + 5) " w100 h160 Choose2", ["Farm", "Ground", "Hill", "Hybrid"])
     UnitData.Push(unit)
     return unit
@@ -469,26 +445,7 @@ forceRobloxSize() {
 }
 ;Basically the code to move roblox, Above
 
-OnSettingsGuiClose(*) {
-    global settingsGuiOpen, SettingsGUI
-    settingsGuiOpen := false
-    if SettingsGUI {
-        SettingsGUI.Destroy()
-        SettingsGUI := ""  ; Clear the GUI reference
-    }
-}
-
 ; try to re-size the roblox to match the macro
-checkSizeTimer() {
-    if (WinExist("ahk_exe RobloxPlayerBeta.exe")) {
-        WinGetPos(&X, &Y, &OutWidth, &OutHeight, "ahk_exe RobloxPlayerBeta.exe")
-        if (OutWidth != 816 || OutHeight != 638) {
-            ProcessLog("Fixing Roblox window size")
-            moveRobloxWindow()
-        }
-    }
-}
-
 
 ApplyCompactLayout() {
     global UnitData, PrioritySlotLabels, PriorityPanelTitle
@@ -506,10 +463,8 @@ ApplyCompactLayout() {
     placementSaveBtn.Move(818, 353, 80, 28)
     AutoAbilityBox.Move(910, 357, 110)
     PriorityUpgrade.Move(1025, 357, 135)
-    PlacementPatternText.Text := "Placing"
-    PlacementPatternText.Move(1193, 336, 80)
-    ResizePlacingDropdown()
-    PlacementPatternDropdown.OnEvent("Change", ResizePlacingDropdown)
+    PlacementPatternText.Visible := false
+    PlacementPatternDropdown.Visible := false
     SaveChestsBox.Move(818, 423, 280)
     aaMainUI.SetFont("Bold s10", "Segoe UI")
     for index, label in ["Keybinds", "Discord"]

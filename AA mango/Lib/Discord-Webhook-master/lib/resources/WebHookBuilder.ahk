@@ -8,7 +8,7 @@
 
 Class WebHookBuilder {
     __New(webhookURL) {
-        if !(webhookURL ~= 'i)https?:\/\/discord\.com\/api\/webhooks\/(\d{18,19})\/[\w-]{68}')
+        if !(webhookURL ~= 'i)^https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+(?:\?[^\s#]*)?$')
             throw Error("invalid webhook URL", , webhookURL)
         this.webhookURL := webhookURL   
     }

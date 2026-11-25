@@ -1,5 +1,4 @@
 ; Effects with explicit signs/numbers are authoritative over JEV and learned cache.
-global CARD_READ_CONFLICTS := Map()
 global CARD_OFFER_DEADLINE := 0
 global CARD_ACTION_BUSY := false
 global CARD_INPUT_BLOCKED := false
@@ -106,15 +105,4 @@ AnalyzeCardEffects(text) {
     result.known := count > 0
     result.reason := result.known ? "explicit signed effects" : "needs local/JEV fallback"
     return result
-}
-
-CardEffectsAgree(a, b) {
-    first := AnalyzeCardEffects(a), second := AnalyzeCardEffects(b)
-    if (first.blocked || second.blocked)
-        return false
-    if (first.known != second.known)
-        return false
-    if first.known
-        return first.signature = second.signature
-    return CanonicalCardText(a) = CanonicalCardText(b)
 }

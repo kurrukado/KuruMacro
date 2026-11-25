@@ -1,0 +1,66 @@
+[
+  {
+    "name": "Dungeon Throne",
+    "file": "DungeonThrone.png",
+    "width": 139,
+    "height": 17,
+    "sources": [
+      "map-current-20261109.png"
+    ],
+    "tolerance": 0
+  },
+  {
+    "name": "Mountain Temple",
+    "file": "MountainTemple.png",
+    "width": 143,
+    "height": 17,
+    "sources": [
+      "mountain-1200-after.png",
+      "mountain-after-spawn.png"
+    ],
+    "tolerance": 0
+  },
+  {
+    "name": "Rain Village",
+    "file": "RainVillage.png",
+    "width": 98,
+    "height": 17,
+    "sources": [
+      "rain-500-after-spawn.png",
+      "rain-movement-live-500-after.png",
+      "rain-current.png"
+    ],
+    "tolerance": 0
+  },
+  {
+    "name": "Sacred Planet",
+    "file": "SacredPlanet.png",
+    "width": 115,
+    "height": 13,
+    "sources": [
+      "live-route-42-final.png"
+    ],
+    "tolerance": 0
+  },
+  {
+    "name": "Ant Kingdom",
+    "file": "AntKingdom.png",
+    "width": 106,
+    "height": 17,
+    "sources": [
+      "ant-diagonal-progress.png",
+      "ant-diagonal-before.png"
+    ],
+    "tolerance": 0
+  },
+  {
+    "name": "Nightmare Train",
+    "file": "NightmareTrain.png",
+    "width": 134,
+    "height": 17,
+    "sources": [
+      "../../Debug/summer-map-after-vote.png"
+    ],
+    "tolerance": 0
+  }
+]

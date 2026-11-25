@@ -20,6 +20,8 @@ ServiceSummerCards(force := false) {
             }
             return false
         }
+        if CapysResultScreenVisible()
+            return false
         ; WaitForCardChoice clears the ghost after confirming the offer is visible.
         WaitForCardChoice(mode)
         return true
@@ -29,21 +31,21 @@ ServiceSummerCards(force := false) {
     }
 }
 
-UnitActionAllowed() {
+UnitActionAllowed(freshCard := false) {
     global rblxID, mode, CARD_ACTION_BUSY, CARD_INPUT_BLOCKED, CARD_OFFER_ACTIVE
     if (!WinActive(rblxID) || CARD_ACTION_BUSY || CARD_OFFER_ACTIVE)
         return false
     if CARD_INPUT_BLOCKED {
-        if CardScreenVisible()
+        if CardScreenVisible(freshCard)
             return false
         CARD_INPUT_BLOCKED := false
     }
-    if (mode = "Summer Event" && CardScreenVisible()) {
+    if (mode = "Summer Event" && CardScreenVisible(freshCard)) {
         CARD_INPUT_BLOCKED := true
         return false
     }
     ; Results take priority over selecting/placing/upgrading another unit.
-    return !ResultScreenReady()
+    return !CapysResultScreenVisible()
 }
 
 CardEngineBlocksInput() {
