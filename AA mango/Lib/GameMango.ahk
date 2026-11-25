@@ -488,7 +488,7 @@ UpgradeSingleUnit(x, y, slot, coord := 0) {
         targetLevel := isMaxLimit ? 999 : Integer(limit)
 
         curLvl := -1
-        if MaxUpgrade(&curLvl, true) {
+        if MaxUpgrade(&curLvl) {
             CloseUnitPanel()
             return "max"
         }
@@ -524,7 +524,7 @@ UpgradeSingleUnit(x, y, slot, coord := 0) {
             ; Check level every press for numeric targets, or at 1, 2, 4, 6, 8 for MAX
             if (!isMaxLimit || pressIdx = 1 || Mod(pressIdx, 2) = 0 || pressIdx = maxBatch) {
                 afterLvl := -1
-                if MaxUpgrade(&afterLvl, true) {
+                if MaxUpgrade(&afterLvl) {
                     CloseUnitPanel()
                     return "max"
                 }
@@ -3756,38 +3756,64 @@ PlaceUnit(x, y, slot := 1, &abilityDone := false) {
     }
 }
 
-MaxUpgrade(&current := -1, panelKnown := false) {
-    global MaxText, MaxText2
-    if !panelKnown
-        Sleep(80)
-    current := ReadUnitUpgradeLevel(panelKnown)
-    if (current = 999 || current = 21)
-        return true
+MaxUpgrade(&current := -1) {
+    global UnitPanelUsesNewUI
+    current := -1
+    if !CapysGetClientBox(&cx, &cy, &cw, &ch, &window) || !WinActive("ahk_id " window)
+        return false
+    if !FindUnitPanel()
+        return false
 
-    ; Capys fast button/label check: (160, 368, 100, 24) "max" & (145, 270, 125, 65) "maxupgrade"
-    maxBtnTxt := CapysOcrRect(160, 368, 100, 24, 4, true)
-    if RegExMatch(maxBtnTxt, "i)^\s*max\s*$")
-        return true
-    if (current < 0) {
-        maxUpgradeTxt := StrLower(RegExReplace(CapysOcrRect(145, 270, 125, 65, 3, true), "[^A-Za-z]", ""))
-        if InStr(maxUpgradeTxt, "maxupgrade")
-            return true
-        static unavailable := Map()
-        for image in ["Images\MaxTag.png", "Images\MaxButton.png"] {
-            try {
-                if FileExist(image) && ImageSearch(&mX, &mY, 110, 249, 309, 442, "*50 " image)
-                    return true
-            } catch {
-                if !unavailable.Has(image) {
-                    ProcessLog("Max marker unavailable: " image "; continuing with text checks")
-                    unavailable[image] := true
-                }
-            }
-        }
-        try return !!((IsSet(MaxText) && FindText(&X, &Y, 0, 150, 600, 500, 0.15, 0.15, MaxText))
-            || (IsSet(MaxText2) && FindText(&X, &Y, 0, 150, 600, 500, 0.15, 0.15, MaxText2)))
+    compact := UnitPanelUsesNewUI
+    level := -1
+    view := {x:cx, y:cy, sx:cw/800, sy:ch/599}
+    if compact {
+        maxed := FindUnitMaxImage(view, "MaxTag.png", [142, 231, 260, 259], 37, 16)
+            || FindUnitMaxImage(view, "MaxButton.png", [152, 363, 270, 398], 37, 21)
+    } else {
+        maxed := FindUnitMaxImage(view, "MaxButtonLegacy.png", [185, 340, 315, 395], 60, 35)
     }
-    return false
+
+    if !maxed {
+        level := ReadUnitUpgradeLevel(true, compact)
+        maxed := level = 999
+        ; The MAX label and action button are independent of the level OCR.
+        if (!maxed && compact) {
+            label := CapysOcrRect(145, 270, 125, 65, 3)
+            maxed := StrLower(RegExReplace(label, "[^A-Za-z]", "")) = "maxupgrade"
+                || RegExMatch(CapysOcrRect(160, 368, 100, 24, 4), "i)^\s*max\s*$")
+        } else if !maxed {
+            maxed := RegExMatch(CapysOcrRect(210, 350, 80, 35, 3), "i)^\s*max\s*$")
+        }
+    }
+
+    try WinGetClientPos(&nx, &ny, &nw, &nh, "ahk_id " window)
+    catch TargetError
+        return false
+    if !WinActive("ahk_id " window) || nx != cx || ny != cy || nw != cw || nh != ch
+        return false
+    current := maxed ? 999 : level
+    return !!maxed
+}
+
+FindUnitMaxImage(view, filename, region, width, height) {
+    static unavailable := Map()
+    path := A_ScriptDir "\Images\" filename
+    oldMode := A_CoordModePixel
+    CoordMode "Pixel", "Screen"
+    try {
+        options := "*25 *w" Max(1, Round(width * view.sx)) " *h" Max(1, Round(height * view.sy)) " " path
+        return ImageSearch(&x, &y, view.x + Round(region[1] * view.sx), view.y + Round(region[2] * view.sy)
+            , view.x + Round(region[3] * view.sx), view.y + Round(region[4] * view.sy), options)
+    } catch Error {
+        if !unavailable.Has(filename) {
+            ProcessLog("MAX image unavailable (" filename "). Using text checks.")
+            unavailable[filename] := true
+        }
+        return false
+    } finally {
+        CoordMode "Pixel", oldMode
+    }
 }
 
 UnitPlaced(&abilityDone := false) {
@@ -4297,7 +4323,7 @@ ParseUnitUpgradeLevel(text) {
     clean := StrUpper(Trim(text))
 
     ; 1. Nhan dien MAX (UPG [MAX], UPG MAX, (MAX), MAX, vv.)
-    if RegExMatch(clean, "i)\bMAX\b|\(\s*MAX\s*\)|\[\s*MAX\s*\]")
+    if RegExMatch(clean, "\b(?:UPGRADE|UPG)\b[\s.:\[(\-]*MAX\b|^[\[(]?\s*MAX\s*[\])]?$")
         return 999
 
     ; 2. Nhan dien UPG [N] hoac Upgrade [N] hoac UPG (N) hoac Upgrade (N)
@@ -4340,45 +4366,34 @@ ParseUnitUpgradeLevel(text) {
     return -1
 }
 
-ReadUnitUpgradeLevel(panelKnown := false) {
-    global rblxID, UnitPanelUsesNewUI
-    if !panelKnown && !FindUnitPanel(&panelX, &panelY)
-        return -1
+ReadUnitUpgradeLevel(panelKnown := false, compact := true) {
+    global UnitPanelUsesNewUI
+    if !panelKnown {
+        if !FindUnitPanel()
+            return -1
+        compact := UnitPanelUsesNewUI
+    }
+    if !compact {
+        header := CapysOcrRect(165, 190, 145, 40, 3)
+        return RegExMatch(header, "i)\bMAX\b") ? 999 : ParseUnitUpgradeLevel(header)
+    }
+
+    ; Read the full header so MAX stays visible alongside UPG.
+    header := CapysOcrRect(142, 232, 118, 23, 4, false)
+    if RegExMatch(header, "i)\b(?:UPG|UPGRADE)\b[\s\S]*\bMAX\b")
+        return 999
+    level := ParseUnitUpgradeLevel(header)
+    if level >= 0
+        return level
     if !CapysGetClientBox(&cx, &cy, &cw, &ch)
         return -1
     sx := cw / 800, sy := ch / 599
-    if panelKnown || (IsSet(UnitPanelUsesNewUI) && UnitPanelUsesNewUI) {
-        ; 1. Fast primary crop (145, 233, 62, 20) scale 2 (~40-80ms)
-        try {
-            txt := OCR.FromRect(cx + Round(145*sx), cy + Round(233*sy), Max(8, Round(62*sx)), Max(8, Round(20*sy)), "en-US", 2).Text
-            lvl := ParseUnitUpgradeLevel(txt)
-            if (lvl >= 0)
-                return lvl
-        }
-        ; 2. Capys gold/orange mask (r>130 && g>85 && b<150 && r>b*1.4) at (145, 235, 50, 15) scale 3
-        try {
-            lvl := ParseUnitUpgradeLevel(ReadHighContrastText(cx + Round(145*sx), cy + Round(235*sy), Max(8, Round(50*sx)), Max(8, Round(15*sy)), 3, 0, false, false, true))
-            if (lvl >= 0)
-                return lvl
-        }
-        ; 3. Fallback wider crop (140, 230, 120, 28) scale 4 only if both failed
-        try {
-            txt := OCR.FromRect(cx + Round(140*sx), cy + Round(230*sy), Max(8, Round(120*sx)), Max(8, Round(28*sy)), "en-US", 4).Text
-            lvl := ParseUnitUpgradeLevel(txt)
-            if (lvl >= 0)
-                return lvl
-        }
-        return -1
-    }
-    ; Use the detected panel, not experience levels or upgrade prices elsewhere.
-    left := Max(0, panelX - 220), top := Max(0, panelY - 260)
-    right := Min(cw, panelX + 250), bottom := Min(ch, panelY + 60)
-    try {
-        text := OCR.FromRect(cx + left, cy + top, right - left, bottom - top, "en-US", 2).Text
-        return ParseUnitUpgradeLevel(text)
-    } catch {
-        return -1
-    }
+    level := ParseUnitUpgradeLevel(CapysOcrRect(145, 233, 62, 20, 2, false))
+    if level >= 0
+        return level
+    try return ParseUnitUpgradeLevel(ReadHighContrastText(cx + Round(145*sx), cy + Round(235*sy)
+        , Max(8, Round(50*sx)), Max(8, Round(15*sy)), 3, 0, false, false, true))
+    return -1
 }
 
 PressUnitUpgrade() {
@@ -4457,7 +4472,7 @@ UpgradeUnit(x, y, slot := 0, &panelClear := false) {
             Sleep(remaining)
         if !UnitActionAllowed()
             return false
-        if MaxUpgrade(&current, true) {
+        if MaxUpgrade(&current) {
             result := "max"
         } else {
             limit := GetUnitUpgradeLimit(slot)
