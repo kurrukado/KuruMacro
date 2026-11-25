@@ -19,7 +19,7 @@ Class AttachmentBuilder {
 		this.fileName := "image.png", this.file := param, this.isBitmap := 1
 		loop files param
 			this.file := A_LoopFileFullPath, this.fileName := A_LoopFileName, this.isBitmap := 0
-		this.attachmentName := "attachment://" this.fileName, this.contentType := this.isBitmap ? "image/png" : AttachmentBuilder.MimeType(this.fileName)
+		this.attachmentName := "attachment://" this.fileName, this.contentType := this.isBitmap ? "image/png" : AttachmentBuilder.MimeType(this.file)
 	}
     static MimeType(path) {
         n :=(f:=FileOpen(path, "r")).ReadUInt(), f.Close()
