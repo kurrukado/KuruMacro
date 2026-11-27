@@ -16,7 +16,9 @@ Class WebHookBuilder {
         defaultHeaders := {
             %"User-Agent"%: "DiscordBot (by Ninju)"
         }
-        (whr := ComObject("WinHttp.WinHttpRequest.5.1")).Open(method, this.webhookURL, false)
+        whr := ComObject("WinHttp.WinHttpRequest.5.1")
+        whr.SetTimeouts(2000, 3000, 5000, 5000)
+        whr.Open(method, this.webhookURL, false)
         for i, j in defaultHeaders.OwnProps()
             whr.SetRequestHeader(i, j)
         for i, j in (options.hasProp("header") ? options.header : {}).OwnProps()

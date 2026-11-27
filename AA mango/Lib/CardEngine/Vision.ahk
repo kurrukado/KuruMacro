@@ -25,3 +25,4 @@ CardVisualVisible(force := false) {
 CardScreenVisible(force := false) {
     return CardVisualVisible(force)
 }
+

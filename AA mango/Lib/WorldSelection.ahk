@@ -84,16 +84,32 @@ WorldClick(view, x, y) {
 }
 
 WorldClearLobbyNotices(view) {
-    if WorldImageFind("World_InfiniteReturnNotice.png",view,[231,224,567,287],299,25) {
-        if !WorldClick(view,400,343)
-            return false
-        Sleep(200)
-    }
-    if WorldImageFind("World_PromoTitle.png",view,[585,200,780,257],143,20) {
-        if !WorldClick(view,761,214)
-            return false
-        Sleep(200)
-    }
+    return DismissInfiniteReturnNotice(view) && DismissWorldPromoNotice(view)
+}
+
+DismissInfiniteReturnNotice(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if !WorldImageFind("World_InfiniteReturnNotice.png",view,[231,224,567,287],299,25)
+        return WorldViewValid(view)
+    if !WorldClick(view,400,343)
+        return false
+    Sleep(200)
+    return WorldViewValid(view)
+}
+
+DismissWorldPromoNotice(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if !WorldImageFind("World_PromoTitle.png",view,[585,200,780,257],143,20)
+        return WorldViewValid(view)
+    if !WorldClick(view,761,214)
+        return false
+    Sleep(200)
     return WorldViewValid(view)
 }
 

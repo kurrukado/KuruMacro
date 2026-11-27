@@ -106,3 +106,4 @@ AnalyzeCardEffects(text) {
     result.reason := result.known ? "explicit signed effects" : "needs local/JEV fallback"
     return result
 }
+

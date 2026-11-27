@@ -135,8 +135,8 @@ SmartScanGreenPoints(slot, physicalKey := false, geometry := "") {
         if !IsObject(after) || after.view != before.view || !SmartHillScanStable(before, after)
             return "interrupted"
         points := SmartHillBuildRegions(before, after)
-        ; A stable scan with no selected-slot marker cannot exhaust Hybrid's green phase.
-        if !points.Length && GetUnitPlacementType(slot) = "Hybrid" && SmartReadSelectedCount(slot) = ""
+        ; Without a selected hotbar slot, an empty scan says nothing about terrain.
+        if !points.Length && SmartReadSelectedCount(slot) = ""
             return "unreadable"
         return points
     } finally {

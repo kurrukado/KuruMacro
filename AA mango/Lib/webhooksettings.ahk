@@ -255,8 +255,8 @@ WebhookSettings() {
 SaveWebhookSettings(showMsg := true) {
     url := Trim(WebhookURLBox.Value)
     if (url != "" && !(url ~= 'i)^https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/(?:v\d+\/)?webhooks\/\d+\/[\w-]+(?:\?[^\s#]*)?$')) {
-        MsgBox("Invalid Webhook URL! Please enter a valid Discord webhook URL.", "Error", "+0x1000")
-        WebhookURLBox.Value := ""
+        ProcessLog("Webhook URL không hợp lệ", true)
+        WebhookURLBox.Focus()
         return false
     }
 
@@ -266,31 +266,28 @@ SaveWebhookSettings(showMsg := true) {
         if RegExMatch(rawId, "^(?:<@!?([0-9]{17,20})>|([0-9]{17,20}))$", &match)
             parsedId := match[1] != "" ? match[1] : match[2]
         else {
-            MsgBox("Invalid Discord User ID! Please enter a valid numeric ID (17-20 digits) or keep it empty.", "Error", "+0x1000")
-            DiscordUserIDBox.Value := ""
+            ProcessLog("Discord ID cần có 17–20 chữ số hoặc để trống", true)
+            DiscordUserIDBox.Focus()
             return false
         }
     }
 
-    ProcessLog("Saving Webhook Configuration")
-    
-    if FileExist(WebhookURLFile)
-        FileDelete(WebhookURLFile)
-    if FileExist(DiscordUserIDFile)
-        FileDelete(DiscordUserIDFile)
-    if FileExist(SendActivityLogsFile)
-        FileDelete(SendActivityLogsFile)
-
-    FileAppend(url, WebhookURLFile, "UTF-8")
-    FileAppend(parsedId, DiscordUserIDFile, "UTF-8")
-    FileAppend(SendActivityLogsBox.Value ? "1" : "0", SendActivityLogsFile, "UTF-8")
-    
-    if (showMsg)
-        MsgBox("Webhook settings saved successfully!", "Success", "T2")
+    sendActivity := !!SendActivityLogsBox.Value
+    try {
+        WriteSettingsFiles([[WebhookURLFile, url], [DiscordUserIDFile, parsedId],
+            [SendActivityLogsFile, sendActivity ? "1" : "0"]], "UTF-8")
+    } catch {
+        ProcessLog("Không lưu được cấu hình Discord", true)
+        return false
+    }
+    if !sendActivity
+        PollActivityWebhooks(, true)
+    if showMsg
+        ProcessLog("Đã lưu cấu hình Discord", true)
     return true
 }
 
-TextWebhook() {
+TextWebhook(message := "", asynchronous := false) {
     global lastlog, WebhookURLFile
     if (!FileExist(WebhookURLFile))
         return
@@ -299,26 +296,78 @@ TextWebhook() {
         return
 
     try {
-        wh := WebHookBuilder(url)
+        if message = ""
+            message := lastlog
         myEmbed := EmbedBuilder()
             .setTitle("")
-            .setDescription("[" FormatTime(A_Now, "hh:mm tt") "] " lastlog)
+            .setDescription("[" FormatTime(A_Now, "hh:mm tt") "] " message)
             .setColor(0x0077ff)
 
-        wh.send({
-            content: "",
-            embeds: [myEmbed],
-            files: []
-        })
+        if asynchronous {
+            payload := JSON.stringify({content: "", embeds: [myEmbed.embedObj]})
+            StartActivityWebhook(url, payload)
+        } else {
+            WebHookBuilder(url).send({content: "", embeds: [myEmbed], files: []})
+        }
     } catch as err {
         ; Silent fail to prevent loop freezes
     }
 }
 
-WebhookLog() {
+WebhookLog(message := "", asynchronous := false) {
     if (!FileExist(WebhookURLFile))
         return
-    TextWebhook()
+    TextWebhook(message, asynchronous)
+}
+
+StartActivityWebhook(url, payload) {
+    request := ComObject("WinHttp.WinHttpRequest.5.1")
+    request.SetTimeouts(2000, 3000, 5000, 5000)
+    request.Open("POST", url, ComValue(11, -1))
+    request.SetRequestHeader("User-Agent", "DiscordBot (by Ninju)")
+    request.SetRequestHeader("Content-Type", "application/json")
+    request.Send(payload)
+    PollActivityWebhooks(request)
+}
+
+PollActivityWebhooks(request := unset, cancelPending := false) {
+    static pending := []
+    previousCritical := A_IsCritical
+    Critical("On")
+    try {
+        if cancelPending {
+            for entry in pending
+                try entry.request.Abort()
+            pending := []
+            SetTimer(PollActivityWebhooks, 0)
+            return
+        }
+        if IsSet(request) {
+            pending.Push({request: request, deadline: A_TickCount + 16000})
+            if pending.Length = 1
+                SetTimer(PollActivityWebhooks, 100)
+            return
+        }
+        count := pending.Length
+        Loop count {
+            index := count - A_Index + 1
+            entry := pending[index]
+            try {
+                if entry.request.WaitForResponse(0) {
+                    pending.RemoveAt(index)
+                } else if A_TickCount >= entry.deadline {
+                    entry.request.Abort()
+                    pending.RemoveAt(index)
+                }
+            } catch {
+                pending.RemoveAt(index)
+            }
+        }
+        if !pending.Length
+            SetTimer(PollActivityWebhooks, 0)
+    } finally {
+        Critical(previousCritical)
+    }
 }
 
 WebhookScreenshot(title, description := "", color := 0x70B68C, status := "", fields := "") {
@@ -329,7 +378,7 @@ WebhookScreenshot(title, description := "", color := 0x70B68C, status := "", fie
         return
 
     global DiscordUserIDFile, wins, loss, currentStreak, stageStartTime, rblxID
-
+    
     ; Parse Discord User ID if configured
     UserIDSent := ""
     if FileExist(DiscordUserIDFile) {
@@ -441,3 +490,4 @@ WebhookScreenshot(title, description := "", color := 0x70B68C, status := "", fie
         Gdip_Shutdown(pToken)
     }
 }
+

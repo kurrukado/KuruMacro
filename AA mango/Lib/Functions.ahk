@@ -9,7 +9,6 @@ if (A_ScriptFullPath = A_LineFile) {
     }
 }
 
-global settingsFile := ""
 global confirmClicked := false
 
 GetModeSettingsPath(modeName) {
@@ -20,14 +19,9 @@ GetModeSettingsPath(modeName) {
 }
 
 setupFilePath() {
-    global settingsFile
-
-    if !DirExist(A_ScriptDir "\Settings") {
+    if !DirExist(A_ScriptDir "\Settings")
         DirCreate(A_ScriptDir "\Settings")
-    }
-
-    settingsFile := A_ScriptDir "\Settings\Configuration.txt"
-    return settingsFile
+    return GetModeSettingsPath("")
 }
 
 ChooseDropdownItemByText(dropDown, text) {
@@ -76,211 +70,197 @@ GetUnitUpgradeLimit(slot) {
 }
 
 readInSettings(modeName := "") {
-    global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
-    global placement1, placement2, placement3, placement4, placement5, placement6
-    global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, NextRoomBox, ReplayBox
-    global MapDropdown, StoryDropdown, StoryActDropdown, LegendDropDown, LegendActDropdown, RaidDropdown, RaidActDropdown, InfinityCastleDropdown, PortalDropdown, ModeDropdown
+    global mode, ModeDropdown, UnitData, macroRunning, SaveChestsForBoss
+    if IsSet(macroRunning) && macroRunning
+        return false
 
     try {
-        if !DirExist(A_ScriptDir "\Settings")
-            DirCreate(A_ScriptDir "\Settings")
-
-        targetMode := modeName != "" ? modeName : (IsSet(ModeDropdown) && ModeDropdown.Text != "" ? ModeDropdown.Text : "")
-        targetFile := ""
-        if (targetMode != "") {
-            modePath := GetModeSettingsPath(targetMode)
-            if FileExist(modePath)
-                targetFile := modePath
+        options := ReadSettingsValues(setupFilePath())
+        if modeName = "" {
+            if !ChooseDropdownItemByText(ModeDropdown, options.Get("Mode", "Infinite"))
+                ModeDropdown.Choose(1)
+            modeName := ModeDropdown.Text
         }
-
-        if (targetFile = "")
-            targetFile := setupFilePath()
-
-        if !FileExist(targetFile)
-            return
-
-        content := FileRead(targetFile)
-        lines := StrSplit(content, "`n")
-
-        for line in lines {
-            if line = ""
-                continue
-
-            parts := StrSplit(line, "=")
-            if (parts.Length < 2)
-                continue
-            key := Trim(parts[1])
-            val := Trim(parts[2], " `t`r`n")
-
-            if RegExMatch(key, "^UnitType([1-6])$", &typeSlot) {
-                try UnitData[Integer(typeSlot[1])].Type.Choose(NormalizeUnitType(val))
-                catch {
-                    try UnitData[Integer(typeSlot[1])].Type.Choose("Ground")
-                }
-                continue
-            }
-            if RegExMatch(key, "^MaxLevel([1-6])$", &maxSlot) {
-                try ChooseDropdownItemByText(UnitData[Integer(maxSlot[1])].MaxLevel, NormalizeUnitMaxLevel(val))
-                continue
-            }
-            switch key {
-                case "Mode":
-                    if (modeName = "") {
-                        mode := val
-                        try ChooseDropdownItemByText(ModeDropdown, mode)
-                    }
-                case "PlacementPattern":
-                    try ChooseDropdownItemByText(PlacementPatternDropdown, val)
-                case "Matchmaking":
-                    try MatchMaking.Value := val = "1"
-                case "ReturnToLobby":
-                    try ReturnLobbyBox.Value := val = "1"
-                case "NextLevel":
-                    try NextLevelBox.Value := val = "1"
-                case "NextRoom":
-                    try NextRoomBox.Value := val = "1"
-                case "Replay":
-                    try ReplayBox.Value := val = "1"
-                case "Map":
-                    for selection in [["Infinite",MapDropdown,"main"], ["Story",StoryDropdown,"main"], ["Legend",LegendDropDown,"legend"]] {
-                        entry := WorldCardEntry(val,selection[3])
-                        if IsObject(entry)
-                            ChooseDropdownItemByText(selection[2],entry["name"])
-                        else if targetMode = selection[1]
-                            selection[2].Choose(0)
-                    }
-                    try ChooseDropdownItemByText(RaidDropdown, val)
-                    try ChooseDropdownItemByText(PortalDropdown, val)
-                case "Enabled1": try enabled1.Value := val
-                case "Enabled2": try enabled2.Value := val
-                case "Enabled3": try enabled3.Value := val
-                case "Enabled4": try enabled4.Value := val
-                case "Enabled5": try enabled5.Value := val
-                case "Enabled6": try enabled6.Value := val
-                case "Placement1": try placement1.Text := val
-                case "Placement2": try placement2.Text := val
-                case "Placement3": try placement3.Text := val
-                case "Placement4": try placement4.Text := val
-                case "Placement5": try placement5.Text := val
-                case "Placement6": try placement6.Text := val
-                case "Priority1": try priority1.Text := val
-                case "Priority2": try priority2.Text := val
-                case "Priority3": try priority3.Text := val
-                case "Priority4": try priority4.Text := val
-                case "Priority5": try priority5.Text := val
-                case "Priority6": try priority6.Text := val
-                case "Pos1", "pos1": try pos1.Text := val
-                case "Pos2", "pos2": try pos2.Text := val
-                case "Pos3", "pos3": try pos3.Text := val
-                case "Pos4", "pos4": try pos4.Text := val
-                case "Pos5", "pos5": try pos5.Text := val
-                case "Pos6", "pos6": try pos6.Text := val
-            }
+        mode := modeName
+        if options.Get("Mode", modeName) != modeName {
+            for key in ["Map", "Act", "Difficulty"]
+                if options.Has(key)
+                    options.Delete(key)
         }
-        ProcessLog("Cấu hình được nạp: " (targetMode != "" ? targetMode : "mặc định"))
+        for key, value in ReadSettingsValues(GetModeSettingsPath(modeName))
+            options[key] := value
+
+        mapControl := ModeMapControl(modeName)
+        if IsObject(mapControl) {
+            mapName := options.Get("Map", modeName = "Infinite" ? WorldMapNames("main")[1] : "")
+            if modeName = "Infinite" || modeName = "Story" || modeName = "Legend" {
+                entry := WorldCardEntry(mapName, modeName = "Legend" ? "legend" : "main")
+                mapName := IsObject(entry) ? entry["name"] : ""
+            }
+            if !ChooseDropdownItemByText(mapControl, mapName)
+                mapControl.Choose(0)
+        }
+        if modeName = "Legend"
+            OnLegendChange()
+        actControl := ModeActControl(modeName)
+        if IsObject(actControl) && !ChooseDropdownItemByText(actControl, options.Get("Act", ""))
+            actControl.Choose(0)
+        if modeName = "Infinity Castle" && !ChooseDropdownItemByText(InfinityCastleDropdown, options.Get("Difficulty", ""))
+            InfinityCastleDropdown.Choose(0)
+
+        ChooseDropdownItemByText(PlacementPatternDropdown, options.Get("PlacementPattern", "Capys"))
+        MatchMaking.Value := options.Get("Matchmaking", "0") = "1"
+        ReturnLobbyBox.Value := options.Get("ReturnToLobby", "0") = "1"
+        NextLevelBox.Value := options.Get("NextLevel", "1") = "1"
+        NextRoomBox.Value := options.Get("NextRoom", "1") = "1"
+        ReplayBox.Value := options.Get("Replay", "1") = "1"
+        AutoAbilityBox.Value := options.Get("AutoAbility", "1") = "1"
+        PriorityUpgrade.Value := options.Get("PriorityUpgrade", "0") = "1"
+        SaveChestsBox.Value := options.Get("SaveChestsForBoss", "1") = "1"
+        SaveChestsForBoss := !!SaveChestsBox.Value
+        for index, unit in UnitData {
+            enabledName := "enabled" index
+            countName := "placement" index
+            priorityName := "priority" index
+            %enabledName%.Value := options.Get("Enabled" index, "0") = "1"
+            if !ChooseDropdownItemByText(%countName%, options.Get("Placement" index, "1"))
+                %countName%.Choose(1)
+            if !ChooseDropdownItemByText(%priorityName%, options.Get("Priority" index, index ""))
+                %priorityName%.Choose(index)
+            try unit.Type.Choose(NormalizeUnitType(options.Get("UnitType" index, "Ground")))
+            catch
+                unit.Type.Choose("Ground")
+            ChooseDropdownItemByText(unit.MaxLevel, NormalizeUnitMaxLevel(options.Get("MaxLevel" index, "MAX")))
+        }
+        return true
+    } catch {
+        ProcessLog("Không đọc được cấu hình", true)
+        return false
     }
 }
 
+ReadSettingsValues(path) {
+    values := Map()
+    values.CaseSense := "Off"
+    if FileExist(path) {
+        for line in StrSplit(FileRead(path, "UTF-8"), "`n", "`r") {
+            parts := StrSplit(line, "=", , 2)
+            if parts.Length = 2
+                values[Trim(parts[1])] := Trim(parts[2])
+        }
+    }
+    return values
+}
+
+ModeMapControl(modeName) {
+    switch modeName {
+        case "Infinite": return MapDropdown
+        case "Story": return StoryDropdown
+        case "Legend": return LegendDropDown
+        case "Raid": return RaidDropdown
+        case "Portal": return PortalDropdown
+    }
+    return 0
+}
+
+ModeActControl(modeName) {
+    switch modeName {
+        case "Story": return StoryActDropdown
+        case "Legend": return LegendActDropdown
+        case "Raid": return RaidActDropdown
+    }
+    return 0
+}
+
 SaveSettings(*) {
-    global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
-    global placement1, placement2, placement3, placement4, placement5, placement6
-    global priority1, priority2, priority3, priority4, priority5, priority6, pos1, pos2, pos3, pos4, pos5, pos6
-    global mode, UnitData, MatchMaking, ReturnLobbyBox, NextLevelBox, NextRoomBox, ReplayBox
-
-    ; Validate all six values before replacing the existing configuration.
-    unitTypes := []
-    for slot, unit in UnitData {
-        try unitTypes.Push(NormalizeUnitType(unit.Type.Text))
-        catch as err {
-            ProcessLog("Unit " slot ": " err.Message)
-            unit.Type.Focus()
-            return false
-        }
-    }
-    maxLevels := []
-    for slot, unit in UnitData {
-        try maxLevels.Push(NormalizeUnitMaxLevel(unit.MaxLevel.Text))
-        catch as err {
-            ProcessLog("Unit " slot ": " err.Message)
-            unit.MaxLevel.Focus()
-            return false
-        }
-    }
-
     try {
-        settingsFile := A_ScriptDir "\Settings\Configuration.txt"
-        if FileExist(settingsFile) {
-            FileDelete(settingsFile)
-        }
-
-        ; Save mode and map selection
-        currMode := (IsSet(mode) && mode != "") ? mode : "Infinite"
+        currMode := ModeDropdown.Text
+        if currMode = ""
+            return false
+        mapControl := ModeMapControl(currMode)
+        actControl := ModeActControl(currMode)
         content := "Mode=" currMode "`n"
-        if (currMode = "Story" && IsSet(StoryDropdown)) {
-            content .= "Map=" StoryDropdown.Text
-        } else if (currMode = "Portal" && IsSet(PortalDropdown)) {
-            content .= "Map= " PortalDropdown.Text
-        } else if (currMode = "Raid" && IsSet(RaidDropdown)) {
-            content .= "Map=" RaidDropdown.Text
-        } else if (IsSet(MapDropdown)) {
-            content .= "Map=" MapDropdown.Text
-        } else {
-            content .= "Map=Planet Greenie"
-        }
-
+        content .= "Map=" (IsObject(mapControl) ? mapControl.Text : GetCurrentMapName())
+        if IsObject(actControl)
+            content .= "`nAct=" actControl.Text
+        if currMode = "Infinity Castle"
+            content .= "`nDifficulty=" InfinityCastleDropdown.Text
         content .= "`nPlacementPattern=" PlacementPatternDropdown.Text
+        content .= "`nMatchmaking=" MatchMaking.Value
+        content .= "`nReturnToLobby=" ReturnLobbyBox.Value
+        content .= "`nNextLevel=" NextLevelBox.Value
+        content .= "`nNextRoom=" NextRoomBox.Value
+        content .= "`nReplay=" ReplayBox.Value
+        content .= "`nAutoAbility=" AutoAbilityBox.Value
+        content .= "`nPriorityUpgrade=" PriorityUpgrade.Value
+        content .= "`nSaveChestsForBoss=" SaveChestsBox.Value
 
-        ; Save settings for each unit
-        content .= "`n`nEnabled1=" (IsSet(enabled1) ? enabled1.Value : 1)
-        content .= "`nEnabled2=" (IsSet(enabled2) ? enabled2.Value : 1)
-        content .= "`nEnabled3=" (IsSet(enabled3) ? enabled3.Value : 1)
-        content .= "`nEnabled4=" (IsSet(enabled4) ? enabled4.Value : 1)
-        content .= "`nEnabled5=" (IsSet(enabled5) ? enabled5.Value : 0)
-        content .= "`nEnabled6=" (IsSet(enabled6) ? enabled6.Value : 0)
-
-        content .= "`n`nPlacement1=" (IsSet(placement1) ? placement1.Text : "1")
-        content .= "`nPlacement2=" (IsSet(placement2) ? placement2.Text : "2")
-        content .= "`nPlacement3=" (IsSet(placement3) ? placement3.Text : "3")
-        content .= "`nPlacement4=" (IsSet(placement4) ? placement4.Text : "4")
-        content .= "`nPlacement5=" (IsSet(placement5) ? placement5.Text : "5")
-        content .= "`nPlacement6=" (IsSet(placement6) ? placement6.Text : "6")
-
-        content .= "`nMatchmaking=" (IsSet(MatchMaking) ? MatchMaking.Value : 0)
-        content .= "`nReturnToLobby=" (IsSet(ReturnLobbyBox) ? ReturnLobbyBox.Value : 0)
-        content .= "`nNextLevel=" (IsSet(NextLevelBox) ? NextLevelBox.Value : 1)
-        content .= "`nNextRoom=" (IsSet(NextRoomBox) ? NextRoomBox.Value : 1)
-        content .= "`nReplay=" (IsSet(ReplayBox) ? ReplayBox.Value : 1)
-        content .= "`nPriority1=" (IsSet(priority1) ? priority1.Text : "1")
-        content .= "`nPriority2=" (IsSet(priority2) ? priority2.Text : "2")
-        content .= "`nPriority3=" (IsSet(priority3) ? priority3.Text : "3")
-        content .= "`nPriority4=" (IsSet(priority4) ? priority4.Text : "4")
-        content .= "`nPriority5=" (IsSet(priority5) ? priority5.Text : "5")
-        content .= "`nPriority6=" (IsSet(priority6) ? priority6.Text : "6")
-        content .= "`nPos1=" (IsSet(pos1) ? pos1.Text : "Pos 1")
-        content .= "`nPos2=" (IsSet(pos2) ? pos2.Text : "Pos 2")
-        content .= "`nPos3=" (IsSet(pos3) ? pos3.Text : "Pos 3")
-        content .= "`nPos4=" (IsSet(pos4) ? pos4.Text : "Pos 4")
-        content .= "`nPos5=" (IsSet(pos5) ? pos5.Text : "Pos 5")
-        content .= "`nPos6=" (IsSet(pos6) ? pos6.Text : "Pos 6")
-
-        for index, value in maxLevels {
-            UnitData[index].MaxLevel.Text := value
-            content .= "`nMaxLevel" index "=" value
+        for index, unit in UnitData {
+            enabledName := "enabled" index
+            countName := "placement" index
+            priorityName := "priority" index
+            posName := "pos" index
+            try unitType := NormalizeUnitType(unit.Type.Text)
+            catch as err {
+                ProcessLog("Unit " index ": " err.Message, true)
+                unit.Type.Focus()
+                return false
+            }
+            content .= "`n`nEnabled" index "=" %enabledName%.Value
+            content .= "`nPlacement" index "=" %countName%.Text
+            content .= "`nPriority" index "=" %priorityName%.Text
+            content .= "`nPos" index "=" %posName%.Text
+            content .= "`nMaxLevel" index "=" NormalizeUnitMaxLevel(unit.MaxLevel.Text)
+            content .= "`nUnitType" index "=" unitType
         }
 
-        for index, value in unitTypes
-            content .= "`nUnitType" index "=" value
-
-        FileAppend(content, settingsFile)
-
+        settingsFile := setupFilePath()
         modeFile := GetModeSettingsPath(currMode)
-        try {
-            if FileExist(modeFile)
-                FileDelete(modeFile)
-            FileAppend(content, modeFile)
+        WriteSettingsFiles([[modeFile, content], [settingsFile, content]])
+    } catch {
+        ProcessLog("Không lưu được cấu hình", true)
+        return false
+    }
+    ProcessLog("Cấu hình đã lưu cho: " currMode, true)
+    return true
+}
+
+WriteSettingsFiles(documents, encoding := "UTF-8-RAW") {
+    previousCritical := A_IsCritical
+    Critical("On")
+    written := []
+    try {
+        for document in documents {
+            path := document[1]
+            previous := FileExist(path) ? FileRead(path, "RAW") : 0
+            ReplaceSettingsFile(path, document[2], encoding)
+            written.Push([path, previous])
         }
-        ProcessLog("Cấu hình đã lưu cho: " currMode)
+    } catch {
+        while written.Length {
+            document := written.Pop()
+            if IsObject(document[2]) {
+                try ReplaceSettingsFile(document[1], document[2])
+            } else {
+                try FileDelete(document[1])
+            }
+        }
+        throw
+    } finally {
+        Critical(previousCritical)
+    }
+}
+
+ReplaceSettingsFile(path, content, encoding := "UTF-8-RAW") {
+    temp := path "." DllCall("GetCurrentProcessId", "UInt") ".tmp"
+    try {
+        if FileExist(temp)
+            FileDelete(temp)
+        FileAppend(content, temp, encoding)
+        FileMove(temp, path, 1)
+    } finally {
+        if FileExist(temp)
+            try FileDelete(temp)
     }
 }
 
@@ -314,96 +294,35 @@ getCurrentTime() {
 }
 
 OnModeChange(*) {
-    global mode, confirmClicked
+    global mode, confirmClicked, macroRunning
+    if IsSet(macroRunning) && macroRunning {
+        ChooseDropdownItemByText(ModeDropdown, mode)
+        return
+    }
     confirmClicked := false
     selected := ModeDropdown.Text
-
-    ; Hide all dropdowns first
-    MapDropdown.Visible := false
-    StoryDropdown.Visible := false
-    StoryActDropdown.Visible := false
-    PortalDropDown.Visible := false
-    LegendDropDown.Visible := false
-    LegendActDropdown.Visible := false
-    RaidDropdown.Visible := false
-    RaidActDropdown.Visible := false
-    InfinityCastleDropdown.Visible := false
-    MatchMaking.Visible := false
-    ReturnLobbyBox.Visible := false
-
-    ;Chọn mode dựa trên đã chọn
-    if (selected = "Story") {
-        StoryDropdown.Visible := true
-        StoryActDropdown.Visible := true
-        mode := "Story"
-    } else if (selected = "Portal") {
-        PortalDropDown.Visible := true
-        mode := "Portal"
-    } else if (selected = "Farm") {
-        mode := "Farm"
-    } else if (selected = "Daily Infinite Quest") {
-        mode := "Daily Infinite Quest"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Legend") {
-        LegendDropDown.Visible := true
-        LegendActDropdown.Visible := true
-        mode := "Legend"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Raid") {
-        RaidDropdown.Visible := true
-        RaidActDropdown.Visible := true
-        mode := "Raid"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Infinity Mansion") {
-        mode := "Infinity Mansion"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Infinity Castle") {
-        InfinityCastleDropdown.Visible := true
-        mode := "Infinity Castle"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Dungeon") {
-        mode := "Dungeon"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Summer Event") {
-        mode := "Summer Event"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Misty Village" || selected = "Misty Infinite") {
-        mode := selected
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Artifacts") {
-        mode := "Artifacts"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Cursed Womb") {
-        mode := "Cursed Womb"
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    } else if (selected = "Infinite") {
-        MapDropdown.Visible := true
-        ReturnLobbyBox.Visible := true
-        MatchMaking.Visible := true
-        mode := "Infinite"
-    }
-    UpdateResultOptionsForMode(selected)
+    mode := selected
     readInSettings(selected)
-    if selected = "Legend"
-        OnLegendChange()
+    RefreshModeOptions(selected)
+    LayoutUnitColumns()
+    OnMapChange()
+}
+
+RefreshModeOptions(selected) {
+    for name in ["Infinite", "Story", "Portal", "Legend", "Raid"] {
+        mapControl := ModeMapControl(name)
+        mapControl.Visible := selected = name
+        actControl := ModeActControl(name)
+        if IsObject(actControl)
+            actControl.Visible := selected = name && mapControl.Text != ""
+    }
+    InfinityCastleDropdown.Visible := selected = "Infinity Castle"
+    SaveChestsBox.Visible := selected = "Dungeon"
+    UpdateResultOptionsForMode(selected)
 }
 
 OnStoryChange(*) {
-    if (StoryDropdown.Text != "") {
-        StoryActDropdown.Visible := true
-    } else {
-        StoryActDropdown.Visible := false
-    }
+    StoryActDropdown.Visible := StoryDropdown.Text != ""
 }
 
 OnLegendChange(*) {
@@ -422,11 +341,7 @@ OnLegendChange(*) {
 }
 
 OnRaidChange(*) {
-    if (RaidDropdown.Text != "") {
-        RaidActDropdown.Visible := true
-    } else {
-        RaidActDropdown.Visible := false
-    }
+    RaidActDropdown.Visible := RaidDropdown.Text != ""
 }
 
 OnConfirmClick(*) {
@@ -434,171 +349,62 @@ OnConfirmClick(*) {
 }
 
 ConfirmModeSelection(hideSelection := true) {
-    if (ModeDropdown.Text = "") {
-        ProcessLog("Select a mode before confirming")
-        return
+    global confirmClicked, mode, macroRunning
+    if IsSet(macroRunning) && macroRunning
+        return false
+    selected := ModeDropdown.Text
+    mapControl := ModeMapControl(selected)
+    actControl := ModeActControl(selected)
+    if selected = "" || (IsObject(mapControl) && mapControl.Text = "") || (IsObject(actControl) && actControl.Text = "")
+        || (selected = "Infinity Castle" && InfinityCastleDropdown.Text = "") {
+        ProcessLog("Chọn đủ chế độ, bản đồ và stage trước khi xác nhận", true)
+        return false
     }
 
-    ; For Story mode, check if both Story and Act are selected
-    if (ModeDropdown.Text = "Story") {
-        if (StoryDropdown.Text = "" || StoryActDropdown.Text = "") {
-            ProcessLog("Select Map and Act too")
-            return
-        }
-        ProcessLog("Selected " StoryDropdown.Text " - " StoryActDropdown.Text)
-        if (StoryActDropdown.Text = "Infinity") {
-            MatchMaking.Visible := true
-            ReturnLobbyBox.Visible := true
-        } else {
-            MatchMaking.Visible := false
-            MatchMaking.Value := 0
-            ReturnLobbyBox.Visible := false
-            ; Định vị tọa độ riêng khi đánh Story thường (Act 1, 2, 3...)
-        }
-
-
+    UpdateResultOptionsForMode(selected)
+    if !hideSelection
+        return true
+    if !SaveSettings()
+        return false
+    mode := selected
+    confirmClicked := true
+    for control in [ModeDropdown, MapDropdown, StoryDropdown, StoryActDropdown, PortalDropdown, LegendDropDown,
+        LegendActDropdown, RaidDropdown, RaidActDropdown, InfinityCastleDropdown, ConfirmButton, modeSelectionGroup] {
+        control.Visible := false
     }
-    ; For Portal mode, check if both Portal and Type are selected
-    else if (ModeDropdown.Text = "Portal") {
-        if (PortalDropDown.Text = "") {
-            ProcessLog("Pick up a Portal, Nigga")
-            return
-        }
-        ProcessLog("Confirmed: " PortalDropDown.Text)
-        MatchMaking.Visible := false
-        MatchMaking.Value := 0
-    }
-    ;For Farm Mode
-    else if (ModeDropdown.Text = "Farm") {
-        ProcessLog("Selected mode: " ModeDropdown.Text)
-        MatchMaking.Visible := false
-        MatchMaking.Value := 0
-    }
-    ;for InfQuestMode
-    else if (ModeDropdown.Text = "Daily Infinite Quest") {
-        ProcessLog("Choosed: Inf Quest Mode")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    ; For Legend mode, check if both Legend and Act are selected
-    else if (ModeDropdown.Text = "Legend") {
-        if (LegendDropDown.Text = "" || LegendActDropdown.Text = "") {
-            ProcessLog("Please select both Legend Stage and Act before confirming")
-            return
-        }
-        ProcessLog("Selected " LegendDropDown.Text " - " LegendActDropdown.Text)
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    ; For Raid mode, check if both Raid and RaidAct are selected
-    else if (ModeDropdown.Text = "Raid") {
-        if (RaidDropdown.Text = "" || RaidActDropdown.Text = "") {
-            ProcessLog("Please select both Raid and Act before confirming")
-            return
-        }
-        ProcessLog("Selected " RaidDropdown.Text " - " RaidActDropdown.Text)
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    ; For Infinity Castle, check if mode is selected
-    else if (ModeDropdown.Text = "Infinity Castle") {
-        if (InfinityCastleDropdown.Text = "") {
-            ProcessLog("Please select an Infinity Castle difficulty before confirming")
-            return
-        }
-        ProcessLog("Selected Infinity Castle - " InfinityCastleDropdown.Text)
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Infinity Mansion") {
-        ProcessLog("Selected Infinity Mansion - random map, Play Here")
-        MatchMaking.Value := 0
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Summer Event") {
-        ProcessLog("Selected Summer Event - result actions follow the GUI options; matchmaking returns to lobby")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Misty Village" || ModeDropdown.Text = "Misty Infinite") {
-        ProcessLog("Selected " . ModeDropdown.Text . " mode")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Artifacts") {
-        ProcessLog("Selected Artifacts mode")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Cursed Womb") {
-        ProcessLog("Selected Cursed Womb mode")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-    }
-    else if (ModeDropdown.Text = "Dungeon") {
-        ProcessLog("Selected Dungeon mode")
-        MatchMaking.Visible := true
-        ReturnLobbyBox.Visible := true
-        SaveChestsBox.Visible := true  ; Show the save chests option for Dungeon mode
-    }
-    ; For Infinite Mode
-    else if (ModeDropdown.Text = "Infinite") {
-        if (MapDropdown.Text = "") {
-            ProcessLog("Choose a map before confirm")
-            return
-        }
-        ProcessLog("Selected Infinite - " MapDropdown.Text)
-        ReturnLobbyBox.Visible := true
-        MatchMaking.Visible := true
-    }
-    else {
-        ProcessLog("Selected mode: " ModeDropdown.Text)
-        MatchMaking.Visible := false
-        MatchMaking.Value := 0
-        ReturnLobbyBox.Visible := false
-    }
-
-    UpdateResultOptionsForMode(ModeDropdown.Text)
-    ; Hide all controls if validation passes. Startup restores the saved mode and
-    ; calls this with hideSelection=false so the mode selector stays usable;
-    ; only a real Confirm click collapses the selector.
-    if (hideSelection) {
-        ModeDropdown.Visible := false
-        MapDropdown.Visible := false
-        StoryDropdown.Visible := false
-        StoryActDropdown.Visible := false
-        PortalDropDown.Visible := false
-        LegendDropDown.Visible := false
-        LegendActDropdown.Visible := false
-        RaidDropdown.Visible := false
-        RaidActDropdown.Visible := false
-        InfinityCastleDropdown.Visible := false
-        ConfirmButton.Visible := false
-        modeSelectionGroup.Visible := false
-        Hotkeytext.Visible := true
-        Hotkeytext2.Visible := true
-        global confirmClicked := true
-        SaveSettings()
-    } else {
-        global confirmClicked := false
-    }
+    Hotkeytext.Visible := true
+    Hotkeytext2.Visible := true
+    return true
 }
 
 UpdateResultOptionsForMode(selectedMode) {
     global NextLevelBox, NextRoomBox, ReplayBox, ReturnLobbyBox, MatchMaking
     mansion := selectedMode = "Infinity Mansion"
-    MatchMaking.Enabled := !mansion
-    if mansion
-        MatchMaking.Value := 0
-    NextLevelBox.Visible:=!mansion
-    NextRoomBox.Visible:=mansion
-    ReplayBox.Visible:=true
-    ReturnLobbyBox.Visible:=true
-    repeatEnabled:=!MatchMaking.Value && !ReturnLobbyBox.Value
-    NextLevelBox.Enabled:=repeatEnabled && !mansion
-    NextRoomBox.Enabled:=repeatEnabled && mansion
-    ReplayBox.Enabled:=repeatEnabled
+    misty := selectedMode = "Misty Village" || selectedMode = "Misty Infinite"
+    storyInfinity := selectedMode = "Story" && StoryActDropdown.Text = "Infinity"
+    hasNextLevel := misty || (selectedMode = "Story" && !storyInfinity)
+    fixedResult := selectedMode = "Farm" || selectedMode = "Portal" || selectedMode = "Daily Infinite Quest"
+        || selectedMode = "Cursed Womb" || storyInfinity
+    canMatchmake := ModeAllowsMatchmaking(selectedMode)
+    canChooseLobby := !fixedResult && !(canMatchmake && MatchMaking.Value)
+    canReplay := canChooseLobby && !ReturnLobbyBox.Value
+    MatchMaking.Enabled := canMatchmake
+    MatchMaking.Visible := canMatchmake
+    ReturnLobbyBox.Enabled := canChooseLobby
+    ReplayBox.Enabled := canReplay
+    NextLevelBox.Text := misty ? "Next Floor" : "Next Level"
+    NextLevelBox.Visible := hasNextLevel
+    NextLevelBox.Enabled := canReplay && hasNextLevel
+    NextRoomBox.Visible := mansion
+    NextRoomBox.Enabled := canReplay && mansion
+}
+
+ModeAllowsMatchmaking(selectedMode) {
+    switch selectedMode {
+        case "Infinity Mansion", "Portal", "Farm", "Cursed Womb": return false
+        case "Story": return StoryActDropdown.Text = "Infinity"
+        default: return true
+    }
 }
 
 FixClick(x, y, LR := "Left") {
@@ -636,20 +442,45 @@ CaptchaDetect(x, y, w, h, inputX, inputY, greenOnly := false) {
                 ; Clean to just get numbers
                 number := RegExReplace(number, "[^\d]")
 
-                if (StrLen(number) >= 5 && StrLen(number) <= 7) {
+                if (StrLen(number) >= 5 && StrLen(number) <= 9) {
                     detectionCount++
 
                     if (detectionCount >= 1) {
-                        ; Send exactly what we detected in the green text
+                        ; 1. Chuẩn bị ô nhập (Focus & Clear)
                         FixClick(inputX, inputY)
-                        Sleep(300)
+                        Sleep(250)
+                        Send("^a{Backspace}")
+                        Sleep(150)
 
-                        ProcessLog("Verification code entered")
+                        ; 2. Gõ mã số (Send digits)
                         for digit in StrSplit(number) {
-                            Send(digit)
-                            Sleep(120)
+                            SendText(digit)
+                            Sleep(80)
                         }
-                        Sleep(200)
+                        Sleep(250)
+                        ProcessLog("Verification code entered")
+
+                        ; 3. Bấm Submit tại (300, 385)
+                        ProcessLog("Submitting verification code at (300, 385)...")
+                        FixClick(300, 385)
+                        Sleep(600)
+
+                        ; 4. Kiểm tra kết quả sau khi bấm Submit
+                        errCheck := ""
+                        try errCheck := OCR.FromRect(100, 440, 600, 70, "FirstFromAvailableLanguages").Text
+                        if (errCheck = "")
+                            try errCheck := ReadHighContrastText(100, 440, 600, 70, 2, 0, false)
+
+                        if InStr(StrLower(RegExReplace(errCheck, "[^A-Za-z]", "")), "incorrect") {
+                            ProcessLog("Verification code incorrect; clearing and retrying...")
+                            FixClick(inputX, inputY)
+                            Sleep(200)
+                            Send("^a{Backspace}")
+                            Sleep(200)
+                            continue
+                        }
+
+                        ProcessLog("Verification code confirmed successfully")
                         return true
                     }
                 }
@@ -657,6 +488,9 @@ CaptchaDetect(x, y, w, h, inputX, inputY, greenOnly := false) {
         }
         Sleep(200)
     }
+
+    ; 5. Fallback khi timeout/thất bại: đóng dialog tại (585, 190)
+    try FixClick(585, 190)
     ProcessLog("Could not detect valid captcha")
     return false
 }
@@ -666,32 +500,75 @@ TogglePriorityDropdowns(*) {
     LayoutUnitColumns()
 }
 
+LoadKeybindSettings() {
+    try {
+        values := ReadSettingsValues(A_ScriptDir "\Settings\Keybinds.txt")
+        if values.Count
+            ApplyKeybindSettings([values.Get("F1", "F1"), values.Get("F2", "F2"),
+                values.Get("F3", "F3"), values.Get("F4", "F4")])
+    } catch {
+        ProcessLog("Không đọc được cấu hình phím tắt", true)
+    }
+    UpdateKeybindText()
+}
+
 SaveKeybindSettings(*) {
-    ProcessLog("Saving Keybind Configuration")
+    keys := [Trim(F1Box.Value), Trim(F2Box.Value), Trim(F3Box.Value), Trim(F4Box.Value)]
+    try {
+        ApplyKeybindSettings(keys, true)
+        UpdateKeybindText()
+        ProcessLog("Đã lưu phím tắt", true)
+    } catch {
+        ProcessLog("Không lưu được phím tắt. Kiểm tra phím trống, trùng hoặc không hợp lệ.", true)
+    }
+}
 
-    if FileExist("Settings\Keybinds.txt")
-        FileDelete("Settings\Keybinds.txt")
+ApplyKeybindSettings(keys, save := false) {
+    global F1Key, F2Key, F3Key, F4Key
+    static actions := [(*) => moveRobloxWindow(), (*) => StartMacro(), (*) => Reload(), (*) => TogglePause()]
+    selected := Map()
+    selected.CaseSense := "Off"
+    oldKeys := [F1Key, F2Key, F3Key, F4Key]
+    for key in keys {
+        if key = "" || selected.Has(key)
+            throw ValueError("Invalid or duplicate hotkey")
+        selected[key] := true
+    }
 
-    FileAppend(Format("F1={}`nF2={}`nF3={}`nF4={}", F1Box.Value, F2Box.Value, F3Box.Value, F4Box.Value),
-    "Settings\Keybinds.txt", "UTF-8")
+    previousCritical := A_IsCritical
+    Critical("On")
+    registered := []
+    try {
+        for index, key in keys {
+            Hotkey(key, actions[index], "On")
+            registered.Push(key)
+        }
+        if save
+            ReplaceSettingsFile(A_ScriptDir "\Settings\Keybinds.txt",
+                Format("F1={}`nF2={}`nF3={}`nF4={}", keys*), "UTF-8")
+        for key in oldKeys
+            if !selected.Has(key)
+                try Hotkey(key, "Off")
+        F1Key := keys[1], F2Key := keys[2], F3Key := keys[3], F4Key := keys[4]
+    } catch {
+        for key in registered
+            try Hotkey(key, "Off")
+        for index, key in oldKeys
+            Hotkey(key, actions[index], "On")
+        throw
+    } finally {
+        Critical(previousCritical)
+    }
+}
 
-    ; Update globals
-    global F1Key := F1Box.Value
-    global F2Key := F2Box.Value
-    global F3Key := F3Box.Value
-    global F4Key := F4Box.Value
-
-    ; Update hotkeys
-    Hotkey(F1Key, (*) => moveRobloxWindow())
-    Hotkey(F2Key, (*) => StartMacro())
-    Hotkey(F3Key, (*) => Reload())
-    Hotkey(F4Key, (*) => TogglePause())
+UpdateKeybindText() {
+    Hotkeytext2.Text := F1Key ": Chỉnh cửa sổ || " F2Key ": Bắt đầu || " F3Key ": Thoát || " F4Key ": Dừng/Tiếp tục"
 }
 
 ToggleSaveChestsForBoss(*) {
     global SaveChestsForBoss
-    SaveChestsForBoss := !SaveChestsForBoss
-    ProcessLog("Save chests for boss room: " (SaveChestsForBoss ? "Enabled" : "Disabled"))
+    SaveChestsForBoss := !!SaveChestsBox.Value
+    ProcessLog("Save chests for boss room: " (SaveChestsForBoss ? "Enabled" : "Disabled"), true)
 }
 
 ; ==============================================================================
@@ -700,28 +577,22 @@ ToggleSaveChestsForBoss(*) {
 global ImgSession := { GuiObj: "", Dots: [], UnitIndex: 0, MaxCount: 20, LastClickTime: 0 }
 
 GetCurrentMapName() {
-    global MapDropdown, StoryDropdown, LegendDropDown, RaidDropdown, PortalDropdown, ModeDropdown
     global SummerMapName, MansionMapName
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Infinity Mansion")
-        return IsSet(MansionMapName) ? MansionMapName : ""
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Summer Event")
-        return IsSet(SummerMapName) ? SummerMapName : ""
-    if (IsSet(ModeDropdown) && (ModeDropdown.Text = "Misty Village" || ModeDropdown.Text = "Misty Infinite"))
-        return "Misty Village"
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Artifacts")
-        return "Artifacts"
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Cursed Womb")
-        return "Cursed Womb"
-    if (IsSet(MapDropdown) && MapDropdown.Visible && MapDropdown.Text != "")
-        return MapDropdown.Text
-    if (IsSet(StoryDropdown) && StoryDropdown.Visible && StoryDropdown.Text != "")
-        return StoryDropdown.Text
-    if (IsSet(LegendDropDown) && LegendDropDown.Visible && LegendDropDown.Text != "")
-        return LegendDropDown.Text
-    if (IsSet(RaidDropdown) && RaidDropdown.Visible && RaidDropdown.Text != "")
-        return RaidDropdown.Text
-    if (IsSet(PortalDropdown) && PortalDropdown.Visible && PortalDropdown.Text != "")
-        return PortalDropdown.Text
+    global DailyQuestMap
+    selected := GetCurrentModeName()
+    switch selected {
+        case "Daily Infinite Quest":
+            if IsSet(DailyQuestMap) && DailyQuestMap != ""
+                return DailyQuestMap
+        case "Farm": return WorldMapNames("main")[1]
+        case "Infinity Mansion": return IsSet(MansionMapName) ? MansionMapName : ""
+        case "Summer Event": return IsSet(SummerMapName) ? SummerMapName : ""
+        case "Misty Village", "Misty Infinite": return "Misty Village"
+        case "Artifacts", "Cursed Womb": return selected
+    }
+    mapControl := ModeMapControl(selected)
+    if IsObject(mapControl)
+        return mapControl.Text
     if (IsSet(MapDropdown) && MapDropdown.Text != "")
         return MapDropdown.Text
     return "Planet Greenie"
@@ -731,12 +602,6 @@ GetCurrentModeName() {
     global ModeDropdown
     if (IsSet(ModeDropdown) && ModeDropdown.Text != "")
         return ModeDropdown.Text
-    global StoryActDropdown
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Infinite")
-        return "Infinite"
-    if (IsSet(ModeDropdown) && ModeDropdown.Text = "Story" && IsSet(StoryActDropdown) && StoryActDropdown.Text =
-    "Infinity")
-        return "Infinite"
     return "Infinite"
 }
 
@@ -938,6 +803,16 @@ SaveUnitCoordsToFile() {
 LoadUnitCoordsFromFile() {
     global UnitPlacements
     filePath := GetSettingsFileName()
+
+    if !FileExist(filePath) && GetCurrentModeName() = "Daily Infinite Quest" && IsSet(DailyQuestMap) && DailyQuestMap != "" {
+        for sourceMode in ["Infinite","Story"] {
+            candidate := A_ScriptDir "\Settings\" DailyQuestMap "_" sourceMode ".txt"
+            if FileExist(candidate) {
+                filePath := candidate
+                break
+            }
+        }
+    }
 
     ; Summer rotates existing maps. Prefer an explicit Summer setup, otherwise
     ; read the old map's coordinates without copying or overwriting that file.

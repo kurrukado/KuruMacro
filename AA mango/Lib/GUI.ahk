@@ -11,7 +11,7 @@ if (A_ScriptFullPath = A_LineFile) {
 
 ; Basic Application Info
 global aaTitle := "KuruMacro Anime Adventures "
-global version := "v5.1"
+global version := "v5.2"
 global rblxID := "ahk_exe RobloxPlayerBeta.exe"
 ;Coordinate and Positioning Variables
 global targetWidth := 816
@@ -131,10 +131,8 @@ OpenConfigPopup(kind, *) {
                 %boxName% := popup.Add("Edit", "x210 y" y " w105 h24 c" uiTheme[6], %keyName%)
             }
             popup.Add("Button", "x210 y175 w105 h28", "Save").OnEvent("Click", SaveKeybindSettings)
-            popup.SetFont("Bold s9 c" uiTheme[1])
-            popup.Add("Text", "x18 y218 w305 h65", "Fixed DEV shortcuts:`nF5: Vote probe`nF9/F10/F11/F12: A/D/W/S movement pulses")
             KuruButtons.Apply(popup)
-            KuruMotion.Open(popup, "w340 h300")
+            KuruMotion.Open(popup, "w340 h225")
         case "Discord":
             popup.Add("Text", "x18 y18", "Webhook URL")
             global WebhookURLBox := popup.Add("Edit", "x18 y45 w370 h24 Password c" uiTheme[6])
@@ -147,13 +145,17 @@ OpenConfigPopup(kind, *) {
                 DiscordUserIDBox.Value := FileRead(DiscordUserIDFile, "UTF-8")
             if FileExist(SendActivityLogsFile)
                 SendActivityLogsBox.Value := Trim(FileRead(SendActivityLogsFile, "UTF-8")) = "1"
-            popup.Add("Button", "x170 y150 w95 h28", "Test").OnEvent("Click", (*) => (SaveWebhookSettings(false), TestWebhook()))
+            popup.Add("Button", "x170 y150 w95 h28", "Test").OnEvent("Click", TestDiscordSettings)
             popup.Add("Button", "x278 y150 w110 h28", "Save").OnEvent("Click", (*) => SaveWebhookSettings(true))
             KuruButtons.Apply(popup)
             KuruMotion.Open(popup, "w410 h200")
     }
 }
 
+TestDiscordSettings(*) {
+    if SaveWebhookSettings(false)
+        TestWebhook()
+}
 
 aaMainUI.SetFont("s12 Bold c" uiTheme[1])
 placementSaveBtn := aaMainUI.Add("Button", "x818 y515 w80 h24", "Save")
@@ -208,6 +210,7 @@ Hotkeytext2.Visible := false
 SaveChestsBox.Visible := false
 ModeDropdown.OnEvent("Change", OnModeChange)
 StoryDropdown.OnEvent("Change", OnStoryChange)
+StoryActDropdown.OnEvent("Change", (*) => UpdateResultOptionsForMode(ModeDropdown.Text))
 LegendDropDown.OnEvent("Change", OnLegendChange)
 RaidDropdown.OnEvent("Change", OnRaidChange)
 ConfirmButton.OnEvent("Click", OnConfirmClick)
@@ -219,7 +222,6 @@ OnMapChange() {
     UpdatePosButtons()
 }
 
-ModeDropdown.OnEvent("Change", (*) => OnMapChange())
 MapDropdown.OnEvent("Change", (*) => OnMapChange())
 StoryDropdown.OnEvent("Change", (*) => OnMapChange())
 LegendDropDown.OnEvent("Change", (*) => OnMapChange())
@@ -300,17 +302,11 @@ global Priority5 := aaMainUI.Add("DropDownList", "x1122 y548 w60 h180 Choose5 +C
 global Priority6 := aaMainUI.Add("DropDownList", "x1198 y548 w60 h180 Choose6 +Center Hidden", ["1", "2", "3", "4", "5", "6"])
 
 PriorityUpgrade.OnEvent("Click", TogglePriorityDropdowns)
+LoadKeybindSettings()
 readInSettings()
-UpdatePosButtons()
-; Rebuild the saved mode's control set without collapsing the mode selector.
-; OnConfirmClick() used to hide every mode control here, so the selector was
-; gone as soon as the macro started. Only a real Confirm click hides it now.
-; OnModeChange() sets Summer matchmaking to 1, so keep the value loaded from
-; Configuration.txt instead of overwriting the user's saved choice.
-savedMatchmaking := MatchMaking.Value
-try OnModeChange()
-MatchMaking.Value := savedMatchmaking
-try ConfirmModeSelection(false)
+mode := ModeDropdown.Text
+RefreshModeOptions(mode)
+OnMapChange()
 ApplyCompactLayout()
 try KuruButtons.Apply(aaMainUI)
 aaMainUI.Show("x0 y0 w1630 h633")
@@ -321,7 +317,7 @@ forceRobloxSize()  ; Initial force size and position
 ;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS;------FUNCTIONS
 
 ;Process text
-ProcessLog(current) {
+ProcessLog(current, activityAsync := false) {
     global ProcessRows, currentOutputFile, lastlog
     Loop ProcessRows.Length {
         index := ProcessRows.Length - A_Index + 1
@@ -341,11 +337,9 @@ ProcessLog(current) {
 
     ; Add webhook logging
     lastlog := current
-    if FileExist("Settings\SendActivityLogs.txt") {
-        SendActivityLogsStatus := FileRead("Settings\SendActivityLogs.txt", "UTF-8")
-        if (SendActivityLogsStatus = "1") {
-            WebhookLog()
-        }
+    try {
+        if FileExist("Settings\SendActivityLogs.txt") && Trim(FileRead("Settings\SendActivityLogs.txt", "UTF-8")) = "1"
+            WebhookLog(current, activityAsync)
     }
 }
 

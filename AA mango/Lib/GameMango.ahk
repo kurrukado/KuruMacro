@@ -3,7 +3,11 @@
 global macroStartTime := A_TickCount
 global stageStartTime := A_TickCount
 global BossRoomCompleted := false
-global SaveChestsForBoss := true
+global ResultCounted := false
+global TransitionCoverMap := ""
+global DailyQuestMap := ""
+global SaveChestsForBoss := IsSet(SaveChestsBox) ? !!SaveChestsBox.Value : true
+global UpgradePauseEpoch := 0
 
 ;HotKeys
 Hotkey(F1Key, (*) => moveRobloxWindow())
@@ -169,6 +173,30 @@ IsPointNearPlaced(x, y, radius := 24) {
     return false
 }
 
+PreparePlacementTerrain(entry) {
+    if !entry.scanTerrain
+        return true
+    if A_TickCount < entry.scanAt
+        return false
+    points := SmartScanGreenPoints(entry.slot)
+    entry.scanAt := A_TickCount + 2000
+    if !IsObject(points)
+        return false
+    if !points.Length && entry.kind = "Hill" {
+        if ++entry.emptyScans >= 3 {
+            entry.exhausted := true
+            ProcessLog("Slot " entry.slot ": no hill platform found in three confirmed previews")
+        }
+        return false
+    }
+    entry.emptyScans := 0
+    entry.greenOnly := points.Length > 0
+    entry.points := entry.greenOnly ? points : GenerateSmartPoints(&scale, entry.slot, "spiral")
+    entry.nextIdx := 1
+    entry.scanTerrain := !entry.points.Length
+    return !entry.scanTerrain
+}
+
 PlacingUnits() {
     global successfulCoordinates, UnitPlacements, rblxID, mode
     global enabled1, enabled2, enabled3, enabled4, enabled5, enabled6
@@ -189,16 +217,24 @@ PlacingUnits() {
 
         requestedTotal += count
         targetPoints := []
-        if (IsSet(UnitPlacements) && UnitPlacements.Has(slot) && UnitPlacements[slot].Length > 0) {
+        kind := GetUnitPlacementType(slot)
+        custom := IsSet(UnitPlacements) && UnitPlacements.Has(slot) && UnitPlacements[slot].Length > 0
+        scanTerrain := !custom && (kind = "Hill" || kind = "Hybrid")
+        if custom {
             ProcessLog("Unit " slot ": using CUSTOM positions from map (" UnitPlacements[slot].Length " points)")
             for pt in UnitPlacements[slot]
                 targetPoints.Push({x: pt[1], y: pt[2]})
-        } else {
-            ProcessLog("Unit " slot ": using standard distribution points")
-            targetPoints := GetDefaultPlacementPoints()
+        } else if !scanTerrain {
+            targetPoints := GenerateSmartPoints(&scale,slot)
+            if !targetPoints.Length {
+                ProcessLog("Unit " slot ": placement geometry unavailable")
+                return false
+            }
+            ProcessLog("Unit " slot ": " (kind = "Farm" ? "outside-in placement rings" : "center-out placement spiral"))
         }
-        slots := GetUnitPlacementType(slot) = "Farm" ? farmSlots : otherSlots
-        slots.Push({slot: slot, target: count, placed: 0, points: targetPoints, nextIdx: 1, limitHit: false, exhausted: false})
+        slots := kind = "Farm" ? farmSlots : otherSlots
+        slots.Push({slot:slot, kind:kind, target:count, placed:0, points:targetPoints, nextIdx:1,
+            limitHit:false, exhausted:false, scanTerrain:scanTerrain, greenOnly:false, scanAt:0, emptyScans:0})
     }
 
     pendingSlots := farmSlots.Length ? farmSlots : otherSlots
@@ -210,13 +246,16 @@ PlacingUnits() {
     ProcessLog("Starting placement...")
     placedTotal := 0
     lastAfkTick := A_TickCount
+    lastPlacementAt := A_TickCount
     nextCheckAt := 0
 
     loop {
         if (A_TickCount >= nextCheckAt) {
-            if (CapysResultScreenVisible()) {
+            if (CapysResultScreenVisible(1000)) {
                 return FormatHandledRoute(HandleStageResult())
             }
+            if mode = "Daily Infinite Quest" && (route := DailyInfiniteWaveRoute())
+                return FormatHandledRoute(route)
             if (IsSet(mode) && mode = "Summer Event")
                 ServiceSummerCards()
             Reconnect(&reconnected)
@@ -226,7 +265,8 @@ PlacingUnits() {
         }
 
         if (A_TickCount - lastAfkTick >= 60000) {
-            FixClick(560, 560)
+            if UnitActionAllowed(true)
+                FixClick(560, 560)
             lastAfkTick := A_TickCount
         }
 
@@ -234,6 +274,8 @@ PlacingUnits() {
 
         for entry in pendingSlots {
             if (entry.limitHit || entry.exhausted || entry.placed >= entry.target)
+                continue
+            if !PreparePlacementTerrain(entry)
                 continue
 
             ptsLen := entry.points.Length
@@ -247,7 +289,8 @@ PlacingUnits() {
             anyFreeSpot := false
 
             while (entry.placed < entry.target && !entry.limitHit && checkedAll < ptsLen) {
-                idx := Mod(entry.nextIdx - 1 + checkedAll, ptsLen) + 1
+                idx := entry.nextIdx
+                entry.nextIdx := Mod(idx, ptsLen) + 1
                 checkedAll++
                 pt := entry.points[idx]
 
@@ -257,7 +300,7 @@ PlacingUnits() {
 
                 anyFreeSpot := true
                 abilityDone := false
-                result := PlaceUnit(pt.x, pt.y, entry.slot, &abilityDone)
+                result := PlaceUnit(pt.x, pt.y, entry.slot, &abilityDone, entry.greenOnly)
                 if (result = "ended") {
                     return FormatHandledRoute(HandleStageResult())
                 }
@@ -267,21 +310,22 @@ PlacingUnits() {
                     break
                 }
                 if (result = true) {
+                    lastPlacementAt := A_TickCount
                     entry.placed++
                     placedTotal++
                     placedInPass++
                     successfulCoordinates.Push({x: pt.x, y: pt.y, slot: entry.slot, misses: 0, priorityDone: false, abilityDone: abilityDone})
                     ProcessLog("Placed Unit " entry.slot " (" entry.placed "/" entry.target ") at " pt.x "," pt.y)
-                    entry.nextIdx := Mod(idx, ptsLen) + 1
                 } else {
                     attemptsThisPass++
-                    entry.nextIdx := Mod(idx, ptsLen) + 1
                 }
 
                 if (A_TickCount >= nextCheckAt) {
-                    if (CapysResultScreenVisible()) {
+                    if (CapysResultScreenVisible(1000)) {
                         return FormatHandledRoute(HandleStageResult())
                     }
+                    if mode = "Daily Infinite Quest" && (route := DailyInfiniteWaveRoute())
+                        return FormatHandledRoute(route)
                     if (IsSet(mode) && mode = "Summer Event")
                         ServiceSummerCards()
                     Reconnect(&reconnected)
@@ -290,12 +334,27 @@ PlacingUnits() {
                     nextCheckAt := A_TickCount + 700
                 }
 
+                if entry.greenOnly && idx = ptsLen && entry.placed < entry.target {
+                    if entry.kind = "Hybrid" {
+                        entry.points := GenerateSmartPoints(&scale, entry.slot, "spiral")
+                        entry.greenOnly := false
+                        entry.scanTerrain := !entry.points.Length
+                    } else
+                        entry.scanTerrain := true
+                    break
+                }
                 ; If lacking Yen / terrain failed 2 tries this pass, rotate to next slot instead of stalling
                 if (attemptsThisPass >= 2)
                     break
             }
 
             if (!anyFreeSpot && entry.placed < entry.target && !entry.limitHit) {
+                if entry.greenOnly && entry.kind = "Hybrid" {
+                    entry.points := GenerateSmartPoints(&scale, entry.slot, "spiral")
+                    entry.greenOnly := false, entry.nextIdx := 1
+                    entry.scanTerrain := !entry.points.Length
+                    continue
+                }
                 ProcessLog("Slot " entry.slot ": all placement points occupied/within 24px (" entry.placed "/" entry.target ")")
                 entry.exhausted := true
             }
@@ -310,6 +369,15 @@ PlacingUnits() {
             if pendingSlots == otherSlots || !otherSlots.Length
                 break
             pendingSlots := otherSlots
+            lastPlacementAt := A_TickCount
+            continue
+        }
+        if A_TickCount - lastPlacementAt >= 120000 {
+            ProcessLog("No new placement in 120s; moving on with " placedTotal " units placed")
+            if pendingSlots == otherSlots || !otherSlots.Length
+                break
+            pendingSlots := otherSlots
+            lastPlacementAt := A_TickCount
             continue
         }
 
@@ -322,41 +390,54 @@ PlacingUnits() {
 }
 
 ProcessUpgradeUnitAt(idx, &anyUpgradedInPass, &routeOut) {
-    global successfulCoordinates, mode
+    global successfulCoordinates, mode, rblxID
+    static nextCheckAt := 0
     routeOut := ""
+    coord := successfulCoordinates[idx]
+    if coord.HasOwnProp("retryAt") && A_TickCount < coord.retryAt
+        return "next"
 
-    if (CapysResultScreenVisible()) {
+    if (A_TickCount >= nextCheckAt || !WinActive(rblxID)) {
+        if (CapysResultScreenVisible(1000)) {
+            successfulCoordinates := []
+            routeOut := FormatHandledRoute(HandleStageResult())
+            return "stop"
+        }
+        if (IsSet(mode) && mode = "Summer Event")
+            ServiceSummerCards()
+        if mode = "Daily Infinite Quest" && (route := DailyInfiniteWaveRoute()) {
+            routeOut := FormatHandledRoute(route)
+            return "stop"
+        }
+        Reconnect(&handled)
+        if handled {
+            routeOut := "reconnected"
+            return "stop"
+        }
+        nextCheckAt := A_TickCount + 1000
+    }
+
+    res := UpgradeSingleUnit(coord.x, coord.y, coord.slot, coord)
+    if (res = "ended" || CapysResultScreenVisible(1000)) {
         successfulCoordinates := []
         routeOut := FormatHandledRoute(HandleStageResult())
         return "stop"
     }
     if (IsSet(mode) && mode = "Summer Event")
         ServiceSummerCards()
-    Reconnect(&handled)
-    if handled {
-        routeOut := "reconnected"
-        return "stop"
-    }
-
-    coord := successfulCoordinates[idx]
-    res := UpgradeSingleUnit(coord.x, coord.y, coord.slot, coord)
-    if (res = "ended" || CapysResultScreenVisible()) {
-        successfulCoordinates := []
-        routeOut := FormatHandledRoute(HandleStageResult())
-        return "stop"
-    }
     if (res = "max" || res = "limit") {
-        ProcessLog("Unit slot " coord.slot " at " coord.x "," coord.y " maxed/reached limit")
+        reached := res = "max" ? "MAX" : "configured Max Level"
+        ProcessLog("Unit slot " coord.slot " at " coord.x "," coord.y " reached " reached)
         successfulCoordinates.RemoveAt(idx)
         anyUpgradedInPass := true
         return "removed"
     }
-    if (res = "no-panel") {
+    if (res = "no-panel" || res = "panel-blocked") {
         coord.misses := coord.HasOwnProp("misses") ? coord.misses + 1 : 1
-        if (coord.misses >= 5) {
-            ProcessLog("Unit slot " coord.slot " at " coord.x "," coord.y " unreachable after 5 panel checks; removing")
-            successfulCoordinates.RemoveAt(idx)
-            return "removed"
+        coord.retryAt := A_TickCount + 2000
+        if (coord.misses = 1 || Mod(coord.misses, 5) = 0) {
+            reason := res = "panel-blocked" ? "previous panel did not close" : "could not open its upgrade panel"
+            ProcessLog("Unit slot " coord.slot " at " coord.x "," coord.y " " reason "; will retry")
         }
         return "next"
     }
@@ -367,19 +448,18 @@ ProcessUpgradeUnitAt(idx, &anyUpgradedInPass, &routeOut) {
 }
 
 UpgradeUnits() {
-    global successfulCoordinates, PriorityUpgrade, priority1, priority2, priority3, priority4, priority5, priority6
-    global rblxID, mode
+    global successfulCoordinates, PriorityUpgrade, mode
 
     if (!successfulCoordinates.Length) {
         ProcessLog("No placed units to upgrade; monitoring stage...")
         return FormatHandledRoute(MonitorStage())
     }
 
-    ProcessLog("Starting batch upgrade...")
-    lastAfkTick := A_TickCount
+    ProcessLog("Starting unit upgrades...")
 
+    lastPrioritySlot := 0
     while (successfulCoordinates.Length) {
-        if (CapysResultScreenVisible()) {
+        if (CapysResultScreenVisible(1000)) {
             ProcessLog("Stage ended during upgrade cycle; proceeding to results")
             successfulCoordinates := []
             return FormatHandledRoute(HandleStageResult())
@@ -392,45 +472,25 @@ UpgradeUnits() {
         if handled
             return "reconnected"
 
-        if (A_TickCount - lastAfkTick >= 60000) {
-            FixClick(560, 560)
-            lastAfkTick := A_TickCount
-        }
-
         anyUpgradedInPass := false
 
-        if (PriorityUpgrade.Value) {
-            for priorityNum in [1, 2, 3, 4, 5, 6] {
-                for slot in [1, 2, 3, 4, 5, 6] {
-                    prioControl := "priority" slot
-                    if (%prioControl%.Text != priorityNum)
-                        continue
+        prioritySlot := PriorityUpgrade.Value ? NextUpgradePrioritySlot() : 0
+        if prioritySlot && prioritySlot != lastPrioritySlot
+            ProcessLog("Upgrade priority: slot " prioritySlot)
+        lastPrioritySlot := prioritySlot
 
-                    i := 1
-                    while (i <= successfulCoordinates.Length) {
-                        if (successfulCoordinates[i].slot != slot) {
-                            i++
-                            continue
-                        }
-                        stepRes := ProcessUpgradeUnitAt(i, &anyUpgradedInPass, &routeOut)
-                        if (stepRes = "stop")
-                            return routeOut
-                        if (stepRes = "removed")
-                            continue
-                        i++
-                    }
-                }
-            }
-        } else {
-            i := 1
-            while (i <= successfulCoordinates.Length) {
-                stepRes := ProcessUpgradeUnitAt(i, &anyUpgradedInPass, &routeOut)
-                if (stepRes = "stop")
-                    return routeOut
-                if (stepRes = "removed")
-                    continue
+        i := 1
+        while (i <= successfulCoordinates.Length) {
+            if prioritySlot && successfulCoordinates[i].slot != prioritySlot {
                 i++
+                continue
             }
+            stepRes := ProcessUpgradeUnitAt(i, &anyUpgradedInPass, &routeOut)
+            if (stepRes = "stop")
+                return routeOut
+            if (stepRes = "removed")
+                continue
+            i++
         }
 
         if (!anyUpgradedInPass) {
@@ -438,42 +498,73 @@ UpgradeUnits() {
         }
     }
 
-    ProcessLog("All units reached MAX or configured Max Level; monitoring stage...")
+    ProcessLog("Upgrade targets confirmed for all placed units; monitoring stage...")
     return FormatHandledRoute(MonitorStage())
 }
 
+NextUpgradePrioritySlot() {
+    global successfulCoordinates, priority1, priority2, priority3, priority4, priority5, priority6
+    selected := 0
+    best := 7
+    for coord in successfulCoordinates {
+        control := "priority" coord.slot
+        rank := %control%.Text
+        if !IsInteger(rank) || rank < 1 || rank > 6
+            continue
+        if rank < best || (rank = best && coord.slot < selected) {
+            best := rank
+            selected := coord.slot
+        }
+    }
+    return selected
+}
+
 UpgradeSingleUnit(x, y, slot, coord := 0) {
-    global rblxID, AutoAbilityBox, mode
-    if !WinActive(rblxID) || !UnitActionAllowed()
+    global rblxID, AutoAbilityBox, mode, UpgradePauseEpoch
+    view := {window: WinActive(rblxID), geometry: SmartPlacementGeometry(), pauseEpoch: UpgradePauseEpoch}
+    if !view.window || view.geometry = "" || !UpgradeViewStable(view)
         return false
+    if CapysResultScreenVisible()
+        return "ended"
+    if !UnitActionAllowed()
+        return CapysResultScreenVisible() ? "ended" : false
 
     oldMouseMode := A_CoordModeMouse
     CoordMode "Mouse", "Client"
+    panelOpened := false, clickedUnit := false, ended := false
     try {
-        if IsUnitPanelOpenFast() {
+        ; Only cancel/close when a panel or ghost might actually be open.
+        if IsUnitPanelOpenFast() || FindSmartPlacementPanel() {
             SendEvent("q")
-            Sleep(40)
-            CloseUnitPanel()
+            Sleep(35)
+            if !UpgradeViewStable(view)
+                return false
+            if !CloseUpgradeSelection(view)
+                return UpgradeViewStable(view) ? "panel-blocked" : false
+            if !UpgradeViewStable(view)
+                return false
         }
 
         FixClick(x, y)
-
-        panelOpened := false
+        clickedUnit := true
+        panelFrames := 0
         loop 4 {
             Sleep(70)
-            if IsUnitPanelOpenFast() {
+            if !UpgradeViewStable(view)
+                return false
+            if !IsUnitPanelOpenFast() && !FindSmartPlacementPanel() {
+                panelFrames := 0
+                continue
+            }
+            if ++panelFrames >= 2 {
                 panelOpened := true
                 break
             }
         }
-        if !panelOpened {
-            if (IsSet(mode) && InStr(mode, "Misty") && DismissDefensePanel())
-                return "no-panel"
-            if !FindSmartPlacementPanel()
-                return "no-panel"
-        } else if (IsSet(mode) && InStr(mode, "Misty") && DismissDefensePanel()) {
+        if (IsSet(mode) && InStr(mode, "Misty") && DismissDefensePanel())
             return "no-panel"
-        }
+        if !panelOpened
+            return "no-panel"
 
         ; Run Auto Ability ONCE per unit
         if !IsObject(coord) || !coord.HasOwnProp("abilityDone") || !coord.abilityDone {
@@ -482,74 +573,126 @@ UpgradeSingleUnit(x, y, slot, coord := 0) {
             if IsObject(coord)
                 coord.abilityDone := true
         }
+        if !UpgradeViewStable(view)
+            return false
 
         limit := GetUnitUpgradeLimit(slot)
         isMaxLimit := (limit = "MAX" || limit = "" || limit = "0" || limit = "OFF")
         targetLevel := isMaxLimit ? 999 : Integer(limit)
 
-        curLvl := -1
-        if MaxUpgrade(&curLvl) {
-            CloseUnitPanel()
+        beforeLevel := -1
+        if MaxUpgrade(&beforeLevel)
             return "max"
-        }
-        if (!isMaxLimit && curLvl >= 0 && curLvl >= targetLevel) {
-            CloseUnitPanel()
+        if !UpgradeViewStable(view)
+            return false
+        if (!isMaxLimit && beforeLevel < 0)
+            return false
+        if (!isMaxLimit && beforeLevel >= targetLevel)
             return "limit"
-        }
 
-        ; Capys Batch Upgrade: keep panel open and press R up to 8 times per pass
-        prevLvl := curLvl
+        ; Capys Batch Upgrade: keep panel open and press R up to 8 times per visit
+        prevLvl := beforeLevel
         upgradedCount := 0
         staleCount := 0
         pressIdx := 0
-        maxBatch := isMaxLimit ? 8 : Max(1, Min(8, targetLevel - Max(0, curLvl)))
+        maxBatch := isMaxLimit ? 8 : Max(1, Min(8, targetLevel - Max(0, beforeLevel)))
 
         while (pressIdx < maxBatch) {
+            if !UpgradeViewStable(view)
+                return false
             if (!IsUnitPanelOpenFast() && !FindSmartPlacementPanel())
                 break
+            if !PressUnitUpgrade(view)
+                return false
 
-            SendEvent("{r down}")
-            Sleep(60)
-            SendEvent("{r up}")
-            Sleep(350)
+            Sleep(300)
             pressIdx++
 
-            if (CapysResultScreenVisible()) {
-                CloseUnitPanel()
+            if CapysResultScreenVisible(1000) {
+                ended := true
                 return "ended"
             }
             if (IsSet(mode) && mode = "Summer Event")
                 ServiceSummerCards()
+            if !UpgradeViewStable(view)
+                return false
 
-            ; Check level every press for numeric targets, or at 1, 2, 4, 6, 8 for MAX
+            ; Read level on every press for numeric targets, or at 1, 2, 4, 6, 8 for MAX
             if (!isMaxLimit || pressIdx = 1 || Mod(pressIdx, 2) = 0 || pressIdx = maxBatch) {
-                afterLvl := -1
-                if MaxUpgrade(&afterLvl) {
-                    CloseUnitPanel()
+                afterLevel := -1
+                isMax := MaxUpgrade(&afterLevel)
+                if !UpgradeViewStable(view)
+                    return false
+                if isMax
                     return "max"
-                }
-                if (!isMaxLimit && afterLvl >= 0 && afterLvl >= targetLevel) {
-                    CloseUnitPanel()
+                if (!isMaxLimit && afterLevel >= 0 && afterLevel >= targetLevel)
                     return "limit"
-                }
 
-                if ((prevLvl >= 0 && afterLvl > prevLvl) || (prevLvl < 0 && afterLvl > 0)) {
+                if ((prevLvl >= 0 && afterLevel > prevLvl) || (prevLvl < 0 && afterLevel > 0)) {
                     upgradedCount++
-                    prevLvl := afterLvl
+                    prevLvl := afterLevel
                     staleCount := 0
                 } else {
                     staleCount += (!isMaxLimit || pressIdx = 1) ? 1 : 2
                     if (staleCount >= 2)
-                        break ; Insufficient Yen for next level -> yield early
+                        break ; Insufficient Yen -> stop batch early
                 }
             }
         }
 
-        CloseUnitPanel()
         return upgradedCount > 0
     } finally {
-        CoordMode "Mouse", oldMouseMode
+        try {
+            if clickedUnit && !ended && UpgradeViewStable(view)
+                CloseUpgradeSelection(view, true)
+        } finally {
+            CoordMode "Mouse", oldMouseMode
+        }
     }
+}
+
+UpgradeViewStable(view) {
+    global rblxID, UpgradePauseEpoch
+    return !SmartPreviewInterrupted() && WinActive(rblxID) = view.window
+        && SmartPlacementGeometry() = view.geometry && UpgradePauseEpoch = view.pauseEpoch
+}
+
+CloseUpgradeSelection(view, clickOutside := false) {
+    if !UpgradeViewStable(view)
+        return false
+    if !IsUnitPanelOpenFast() && !FindSmartPlacementPanel()
+        return UpgradeViewStable(view)
+    ; Close via red X in CloseUnitPanel() first; only click outside as fallback if panel stayed open
+    if !CloseUnitPanel() && clickOutside {
+        try {
+            WinGetClientPos(,, &width, &height, "ahk_id " view.window)
+            if UpgradeViewStable(view) {
+                FixClick(Round(638 * width / 800), Round(549 * height / 599))
+                Sleep(60)
+            }
+        }
+    }
+    return UpgradeViewStable(view) && !IsUnitPanelOpenFast() && !FindSmartPlacementPanel() && UpgradeViewStable(view)
+}
+
+ReadUpgradeVisitStatus(view, targetLevel, &level) {
+    maxed := MaxUpgrade(&level)
+    if !UpgradeViewStable(view)
+        return "retry"
+    ; MAX may retry R on the freshly confirmed panel without a numeric read.
+    ; A numeric cap needs a readable level before R to avoid overshooting.
+    if !maxed && level < 0 && targetLevel != 999
+        return "retry"
+    if !maxed && level < targetLevel
+        return false
+    ; Require the same completion result from a fresh panel read.
+    Sleep(70)
+    if !UpgradeViewStable(view)
+        return "retry"
+    stillMax := MaxUpgrade(&confirmedLevel)
+    if !UpgradeViewStable(view) || maxed != stillMax || (!stillMax && confirmedLevel < targetLevel)
+        return "retry"
+    return stillMax ? "max" : "limit"
 }
 
 IsModeCancelOpen(&outX := 0, &outY := 0) {
@@ -911,8 +1054,8 @@ SummerEventMode() {
     Sleep(1500)
 
     ; 3. Di chuyển sảnh đến hàng chờ: MapWalk("w", 3050), MapWalk("wa", 1216), Sleep 1000
-    MapWalk("w", 3050)
-    MapWalk("wa", 1216)
+    if !MapWalk("w", 3050) || !MapWalk("wa", 1216)
+        return false
     Sleep(1000)
 
     ; 4. Nếu có hộp xác minh CAPTCHA, gọi CaptchaDetect (bảo toàn điểm gọi thứ 2 cho invariants)
@@ -963,7 +1106,8 @@ MistyVillageMode() {
     Sleep(1500)
 
     ; 3. Di chuyển sảnh đến cổng Misty: MapWalk("sd", 2530), Sleep 1000
-    MapWalk("sd", 2530)
+    if !MapWalk("sd", 2530)
+        return false
     Sleep(1000)
 
     ; 4. Mở bảng chọn Stage: mặc định Day (335, 324)
@@ -1010,11 +1154,14 @@ MistyInfiniteMode() {
 
     ; 3. Di chuyển sảnh đến NPC Flutter: W 1.5s -> D 0.5s -> W 1s
     ProcessLog("Misty Infinite: walking to Flutter NPC (W 1.5s -> D 0.5s -> W 1s)")
-    MapWalk("w", 1500)
+    if !MapWalk("w", 1500)
+        return false
     Sleep(150)
-    MapWalk("d", 500)
+    if !MapWalk("d", 500)
+        return false
     Sleep(150)
-    MapWalk("w", 1000)
+    if !MapWalk("w", 1000)
+        return false
     Sleep(500)
 
     ; 4. Bấm phím E để tương tác với NPC Flutter
@@ -1054,131 +1201,128 @@ MistyInfiniteMode() {
 }
 
 ArtifactsMode() {
-    global rblxID, MatchMaking
-    targetWin := WinExist(rblxID)
-    if !targetWin
-        targetWin := WinExist("ahk_exe RobloxPlayerBeta.exe")
-    if !targetWin
-        targetWin := WinExist("Roblox")
-    if !targetWin {
-        ProcessLog("Artifacts: Roblox window not found!")
+    global MatchMaking
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    for step in [["s",4851,516],["a",4346,959],["w",268,1491]] {
+        if !WorldViewValid(view) || !MapWalk(step[1],step[2])
+            return false
+        Sleep(step[3])
+    }
+    if !WorldViewValid(view) || !MapMovementReady()
+        return false
+    SendEvent("{e}")
+
+    if !LobbyEntryLabel(view, "^(artifact\s+stages?|artifacts?)$", [200,430,260,100], true, 26)
+        || !LobbyEntryLabel(view, "^bloodstained\s+street$", [606,188,191,87], true)
+        || !LobbyEntryLabel(view, "^select$", [330,406,140,65], true)
+        return false
+    if MatchMaking.Value {
+        if !FindMatch(true)
+            return false
+    } else if !LobbyEntryLabel(view, "^play\s+here$", [255,294,157,91], true)
+        || !LobbyEntryLabel(view, "^open$", [186,320,142,72], true)
+        || !LobbyEntryLabel(view, "^start$", [298,425,208,83], true) {
         return false
     }
-    WinActivate("ahk_id " targetWin)
-    Sleep(200)
+    return RestartStage()
+}
 
-    ProcessLog("Artifacts mode: moving to portal (S4851ms -> A4346ms -> W268ms)")
-    MapWalk("s", 4851)
-    Sleep(150)
-    MapWalk("a", 4346)
-    Sleep(150)
-    MapWalk("w", 268)
-    Sleep(500)
-
-    ; Interact with Artifacts portal
-    SendEvent("{e}")
-    Sleep(1000)
-
-    ; Stage select / Start match
-    FixClick(400, 324)
-    Sleep(800)
-
-    if (MatchMaking.Value) {
-        if (!FindMatch())
-            return false
-    } else {
-        PlayHere()
-    }
-
-    return RestartStage("Artifacts")
+CursedWombKeyPanelVisible() {
+    return InStr(CapysNormalize(CapysOcrRect(155,142,485,120,3)),"cursedwombkey")
 }
 
 CursedWombMode() {
-    global rblxID, MatchMaking
-    targetWin := WinExist(rblxID)
-    if !targetWin
-        targetWin := WinExist("ahk_exe RobloxPlayerBeta.exe")
-    if !targetWin
-        targetWin := WinExist("Roblox")
-    if !targetWin {
-        ProcessLog("Cursed Womb: Roblox window not found!")
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    title := CapysNormalize(CapysOcrRect(265,208,142,105,3))
+    if InStr(title,"cursedwomb") && LobbyEntryLabel(view,"^select$",[272,334,124,31],true,1)
+        return RestartStage()
+
+    if !CursedWombKeyPanelVisible() || !WorldViewValid(view) {
+        ProcessLog("Cursed Womb: key panel unavailable; no lobby path recording included")
         return false
     }
-    ProcessLog("Cursed Womb: Đang kích hoạt Roblox...")
-    WinActivate("ahk_id " targetWin)
-    Sleep(200)
-
-    ProcessLog("Cursed Womb: Chọn Cursed Womb Key tại (219, 289)...")
-    FixClick(219, 289)
-    Sleep(800)
-
-    ProcessLog("Cursed Womb: Bấm nút Select tại (333, 349)...")
-    FixClick(333, 349)
-    Sleep(800)
-
-    if (MatchMaking.Value) {
-        ProcessLog("Cursed Womb: Đang tìm trận (Matchmaking)...")
-        if (!FindMatch())
+    if !WorldClick(view,219,289)
+        return false
+    loop 20 {
+        Sleep(250)
+        if !WorldViewValid(view)
             return false
-    } else {
-        ProcessLog("Cursed Womb: Chọn chơi đơn (Play Here)...")
-        PlayHere()
+        title := CapysNormalize(CapysOcrRect(265,208,142,105,3))
+        if InStr(title,"cursedwomb") && LobbyEntryLabel(view,"^select$",[272,334,124,31],true,1)
+            return RestartStage()
     }
-
-    ProcessLog("Cursed Womb: Vào trận, khởi động stage...")
-    return RestartStage("Cursed Womb")
+    ProcessLog("Cursed Womb: Select was not confirmed")
+    return false
 }
 
-DismissVillageShopPopup() {
-    if !CapysGetClientBox(&cx, &cy, &cw, &ch, &targetWin) || !WinActive("ahk_id " targetWin)
+DismissVillageShopPopup(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
         return false
 
-    sx := cw / 800, sy := ch / 599
+    button := FindVillageShopLeaveButton(view)
+    if !IsObject(button)
+        button := FindVillageShopCloseButton(view)
+    if !IsObject(button) || !WorldClick(view,button.x,button.y)
+        return false
+
+    ProcessLog("Village Shop: clicked " button.label)
+    Sleep(500)
+    return WorldViewValid(view)
+}
+
+FindVillageShopLeaveButton(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+
     oldPixelMode := A_CoordModePixel
-    oldMouseMode := A_CoordModeMouse
-    CoordMode "Pixel", "Screen"
-    CoordMode "Mouse", "Screen"
+    CoordMode "Pixel","Screen"
     try {
-        ; 1. Check for "LEAVE THE SHOP?" prompt: green Leave (x 270..380) + red Stay (x 430..530) with OCR confirmation
         y := 240
-        while (y <= 470) {
+        while y <= 470 && WorldViewValid(view) {
             rowMatch := true
-            for pt in [[270, 1], [310, 1], [360, 1], [440, 0], [500, 0]] {
-                rgb := PixelGetColor(cx + Round(pt[1] * sx), cy + Round(y * sy), "RGB")
-                r := (rgb >> 16) & 0xFF, g := (rgb >> 8) & 0xFF, b := rgb & 0xFF
-                if !(pt[2] ? (g > 130 && r < 130 && b < 80) : (r > 150 && g < 70 && b < 70)) {
+            for point in [[270,true],[310,true],[360,true],[440,false],[500,false]] {
+                rgb := PixelGetColor(view.x+Round(point[1]*view.sx),view.y+Round(y*view.sy))
+                r := (rgb>>16)&255, g := (rgb>>8)&255, b := rgb&255
+                if !(point[2] ? (g>130 && r<130 && b<80) : (r>150 && g<70 && b<70)) {
                     rowMatch := false
                     break
                 }
             }
             if rowMatch {
-                words := StrLower(RegExReplace(CapysOcrRect(235, Max(0, y - 110), 330, 92, 2, true), "[^A-Za-z]", ""))
-                if InStr(words, "shop") && (InStr(words, "leave") || InStr(words, "offers") || InStr(words, "village")) {
-                    ProcessLog("Village Shop: OCR-verified Leave button at y=" y)
-                    FixClick(cx + Round(321 * sx), cy + Round(y * sy))
-                    Sleep(500)
-                    return true
-                }
+                words := CapysNormalize(CapysOcrRect(235,Max(0,y-110),330,92,2,true))
+                if InStr(words,"shop") && RegExMatch(words,"leave|offers|village") && WorldViewValid(view)
+                    return {x:321,y:y,label:"Leave"}
             }
             y += 6
         }
+    } finally CoordMode "Pixel",oldPixelMode
+    return false
+}
 
-        ; 2. Check for Village Shop close X around (582, 211) with OCR header confirmation
-        cX := PixelGetColor(cx + Round(582 * sx), cy + Round(211 * sy), "RGB")
-        rx := (cX >> 16) & 0xFF, gx := (cX >> 8) & 0xFF, bx := cX & 0xFF
-        if (rx > 170 && gx < 100 && bx < 100) {
-            headerWords := StrLower(RegExReplace(CapysOcrRect(195, 175, 340, 55, 2, true), "[^A-Za-z]", ""))
-            if InStr(headerWords, "villageshop") || (InStr(headerWords, "village") && InStr(headerWords, "shop")) || InStr(headerWords, "ore") {
-                ProcessLog("Village Shop: OCR-verified popup; clicking close X button")
-                FixClick(cx + Round(582 * sx), cy + Round(211 * sy))
-                Sleep(500)
-                return true
-            }
-        }
-    } finally {
-        CoordMode "Pixel", oldPixelMode
-        CoordMode "Mouse", oldMouseMode
-    }
+FindVillageShopCloseButton(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+
+    oldPixelMode := A_CoordModePixel
+    CoordMode "Pixel","Screen"
+    try rgb := PixelGetColor(view.x+Round(582*view.sx),view.y+Round(211*view.sy))
+    finally CoordMode "Pixel",oldPixelMode
+    if ((rgb>>16)&255)<=170 || ((rgb>>8)&255)>=100 || (rgb&255)>=100
+        return false
+    header := CapysNormalize(CapysOcrRect(195,175,340,55,2,true))
+    if (InStr(header,"villageshop") || (InStr(header,"village") && InStr(header,"shop")) || InStr(header,"ore"))
+        && WorldViewValid(view)
+        return {x:582,y:211,label:"Close"}
     return false
 }
 
@@ -1473,13 +1617,12 @@ global MansionMapName := ""
 InfinityMansionMode() {
     if !InfinityMansionEnter()
         return false
-    return RestartStage("Infinity Mansion")
+    return RestartStage()
 }
 
 InfinityMansionEnter() {
-    global mode, MatchMaking, MansionMapName
+    global mode, MansionMapName
     mode := "Infinity Mansion"
-    MatchMaking.Value := 0
     MansionMapName := ""
     if !InfinityMansionMovement()
         return false
@@ -1679,47 +1822,58 @@ StoryMode() {
 
 PortalMode() {
     global PortalDropdown
-
-    ;get portal type
-    currentPortalType := PortalDropdown.Text
-
-    ; Execute the movement pattern
-    while !IsModeCancelOpen(&X, &Y) {
-        if !PortalMovement()
-            return false
-    }
-    ProcessLog("Going to: - " currentPortalType)
-
-    ; Handle play mode selection
-    return RestartStage(currentPortalType)
+    name := PortalDropdown.Text
+    if !PortalMovement(name)
+        return false
+    return RestartStage(name)
 }
 
 FarmMode() {
-    ProcessLog("Processing for Farm Mode")
-    while !IsModeCancelOpen(&X, &Y) {
-        if !FarmMovement()
-            return false
-    }
-    ProcessLog("Going to Farm")
-    PlayHere()
-    return RestartStage("Farm")
+    global mode
+    mode := "Farm"
+    map := WorldMapNames("main")[1]
+    if !StoryMovement() || !SelectWorldMap(map,"main") || !SelectWorldAct("Infinity","main") || !WorldStartSolo()
+        return false
+    return RestartStage(map)
 }
 
 InfQuestMode() {
-    ProcessLog("Processing for Daily Infinite Quest")
-    while !IsModeCancelOpen(&X, &Y) {
-        if !InfQuestMovement()
-            return false
+    global MatchMaking, DailyQuestMap, mode
+    mode := "Daily Infinite Quest"
+    quests := ReadDailyInfiniteQuests()
+    if !IsObject(quests)
+        return false
+    name := NextInfiniteQuestMap(quests,DailyQuestMap)
+    if name = "" {
+        ProcessLog("Daily Infinite Quest: all 9 tasks completed and rewards claimed")
+        return "complete"
     }
 
-    if (MatchMaking.Value) { ;find match or play alone
-        if (!FindMatch())
-            return false
-    } else {
-        PlayHere()
+    ProcessLog("Daily Infinite Quest: entering " name " Infinite")
+    if !StoryMovement() || !SelectWorldMap(name,"main") || !SelectWorldAct("Infinity","main")
+        return false
+    if !(MatchMaking.Value ? FindMatch() : WorldStartSolo())
+        return false
+    DailyQuestMap := name
+    return RestartStage(name)
+}
+
+NextInfiniteQuestMap(quests, previous := "") {
+    pendingMaps := []
+    seen := Map()
+    for quest in quests {
+        if quest.status = "pending" && !seen.Has(quest.map) {
+            seen[quest.map] := true
+            pendingMaps.Push(quest.map)
+        }
     }
-    ProcessLog("Entering Inf quest...")
-    return RestartStage("Daily Infinite Quest")
+    if !pendingMaps.Length
+        return ""
+    for index, mapName in pendingMaps {
+        if mapName = previous
+            return pendingMaps[Mod(index,pendingMaps.Length)+1]
+    }
+    return pendingMaps[1]
 }
 
 LegendMode() {
@@ -1753,81 +1907,42 @@ LegendMode() {
 }
 
 RaidMode() {
-    global RaidDropdown, RaidActDropdown
-
-    ; Get current map and act
-    currentRaidMap := RaidDropdown.Text
-    currentRaidAct := RaidActDropdown.Text
-
-    ; Execute the movement pattern
-    ProcessLog("Moving to: " currentRaidMap)
-    RaidMovement()
-
-    ; Start stage
-    while !IsModeCancelOpen(&X, &Y) {
-        RaidMovement()
-    }
-    ProcessLog("Processing: " currentRaidMap " - " currentRaidAct)
-    StartRaid(currentRaidMap, currentRaidAct)
-
-    ; Handle play mode selection
-    if (MatchMaking.Value) {
-        if (!FindMatch())
-            return false
-    } else {
-        PlayHere()
-    }
-    return RestartStage(currentRaidMap)
+    global RaidDropdown, RaidActDropdown, MatchMaking
+    map := RaidDropdown.Text, act := RaidActDropdown.Text
+    if !GetRaidDownArrows(map) || !GetRaidActDownArrows(act)
+        return false
+    view := LobbyEntryView()
+    if !IsObject(view) || !RaidMovement(view) || !StartRaid(map, act, view)
+        return false
+    if !(MatchMaking.Value ? FindMatch() : LobbyEntryStartSolo(view))
+        return false
+    return RestartStage(map)
 }
 
 InfinityCastleMode() {
-    global InfinityCastleDropdown
-
-    ; Get current difficulty
-    currentDifficulty := InfinityCastleDropdown.Text
-
-    ; Execute the movement pattern
-    ProcessLog("Moving to Infinity Castle")
-    InfCastleMovement()
-
-    ; Start stage
-    while !IsModeCancelOpen(&X, &Y) {
-        InfCastleMovement()
-    }
-    ProcessLog("Starting Infinity Castle - " currentDifficulty)
-
-    ; Select difficulty with direct clicks
-    if (currentDifficulty = "Normal") {
-        FixClick(418, 375)  ; Click Easy Mode
-    } else {
-        FixClick(485, 375)  ; Click Hard Mode
-    }
-
-    ;Start Inf Castle
-    if (MatchMaking.Value) {
-        if (!FindMatch())
-            return false
-    } else {
-        PlayHere()
-        if (ok := IsModeCancelOpen(&X, &Y)) {
-            ClickUntilGone(0, 0, 325, 520, 489, 587, ModeCancel, -10, -120)
-        }
-    }
+    global InfinityCastleDropdown, MatchMaking
+    difficulty := InfinityCastleDropdown.Text
+    if difficulty != "Normal" && difficulty != "Hard"
+        return false
+    view := LobbyEntryView()
+    if !IsObject(view) || !InfCastleMovement(view)
+        return false
+    label := difficulty = "Normal" ? "^(normal|easy)$" : "^hard$"
+    if !LobbyEntryLabel(view, label, [330,343,220,63], true)
+        return false
+    if !(MatchMaking.Value ? FindMatch() : LobbyEntryStartSolo(view))
+        return false
     return RestartStage("Infinity Castle")
 }
 
 DungeonMode() {
-    ProcessLog("Entering Dungeon Mode (35, 404)")
-    FixClick(35, 404)  ; Click Dungeon mode button (Capys direct click)
-    Sleep(1000)
-    loop 5 {
-        if (ok := FindText(&X, &Y, 310, 395, 495, 440, 0.20, 0.20, EnterDungeon)) {
-            FixClick(395, 380)
-            Sleep(1000)
-            break
-        }
-        Sleep(500)
-    }
+    global MatchMaking, BossRoomCompleted
+    BossRoomCompleted := false
+    view := LobbyEntryView()
+    if !IsObject(view) || !WorldClick(view,35,404)
+        return false
+    if !LobbyEntryLabel(view,"^(enter|enter dungeon)$",[300,352,200,89],true)
+        return false
 
     if (MatchMaking.Value) {
         if (!FindMatch())
@@ -1888,314 +2003,411 @@ ClickEndMenu(offset) {
     }
 }
 
-MonitorEndScreen(dungeon := false) {
-    global rblxID, mode, StoryDropdown, StoryActDropdown, ReturnLobbyBox, MatchMaking
-    global NextLevelBox, NextRoomBox, ReplayBox, lastResult
+MonitorEndScreen() {
+    global LobbyText, LobbyText2, lastResult, ResultCounted
     EndCardMatch("result-screen")
-
     deadline := A_TickCount + 60000
-    beatsWithoutButton := 0
+    lastResult := ResultCounted ? lastResult : "unknown"
+    waitingLogged := false
+    reward := {beats:0,summaryNextConfirmed:false}
 
     while A_TickCount < deadline {
-        Sleep(1000)
         Reconnect(&reconnected)
         if reconnected
             return "reconnected"
 
-        if !CapysGetClientBox(&cx, &cy, &cw, &ch, &tw) || SmartPreviewInterrupted(true)
-            continue
-
-        ; Dismiss Village Shop / Leave popup if present (UPD 21.5)
-        DismissVillageShopPopup()
-
-        ; Close unit panel if still open
-        if WinActive("ahk_id " tw) && (ok := FindText(&X, &Y, 300, 190, 360, 250, 0, 0, UnitExit)) {
-            ClickUntilGone(0, 0, 300, 190, 360, 250, UnitExit, -4, -35)
-        }
-
-        ; Handle Next button / reward prompt ("Click anywhere to continue" - Capys OCR + FindText)
-        if CapysReadReward() {
-            beatsWithoutButton := 0
-            if !WinActive("ahk_id " tw) {
-                WinActivate("ahk_id " tw)
-                Sleep(150)
-            }
-            if CapysGetClientBox(&cx, &cy, &cw, &ch) {
-                sx := cw / 800, sy := ch / 599
-                oldMode := A_CoordModeMouse
-                CoordMode "Mouse", "Screen"
-                try FixClick(cx + Round(400 * sx), cy + Round(450 * sy))
-                finally CoordMode "Mouse", oldMode
-            }
-            continue
-        }
-        if (ok := FindText(&X, &Y, 260, 400, 390, 450, 0, 0, NextText)) {
-            beatsWithoutButton := 0
-            oldMode := A_CoordModeMouse
-            CoordMode "Mouse", "Screen"
-            try FixClick(X, Y - 40)
-            finally CoordMode "Mouse", oldMode
+        if (window := RefreshClientTarget()) && !WinActive("ahk_id " window)
+            try WinActivate("ahk_id " window)
+        view := LobbyEntryView()
+        if !IsObject(view) {
+            Sleep(500)
             continue
         }
 
-        ; Check if player already arrived in lobby
-        if (ok := FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText)) {
-            ProcessLog("End screen: lobby confirmed; returning to main loop")
-            return CheckLobby()
+        DismissVillageShopPopup(view)
+        if !WorldViewValid(view)
+            continue
+        if DismissResultUnitPanel(view)
+            continue
+        dungeon := HandleDungeonDeathScreen(view)
+        if dungeon = "lobby"
+            return dungeon
+        if dungeon = "handled"
+            continue
+        rewardScreen := ReadResultRewardScreen(view)
+        if !ResultCounted && rewardScreen.result != "" {
+            RecordMatchResult(rewardScreen.result)
+            rewardScreen := ReadResultRewardScreen(view)
         }
+        if AdvanceResultReward(view,reward,rewardScreen)
+            continue
 
-        ; Handle end screen buttons via Capys OCR Choice OR LobbyText FindText
-        capysChoice := CapysReadChoice()
-        hasCapysChoice := IsObject(capysChoice) && capysChoice["kind"] = "choice"
-        if (hasCapysChoice || FindText(&X, &Y, 80, 85, 739, 224, 0, 0, LobbyText) || FindText(&X, &Y, 80, 85, 739, 224, 0, 0, LobbyText2)) {
-            if (hasCapysChoice && capysChoice["ownerWait"]) {
-                ProcessLog("End screen: waiting for party owner...")
-                continue
+        choice := CapysReadChoice(false)
+        if IsObject(choice) {
+            if choice["ownerWait"] {
+                if !waitingLogged
+                    ProcessLog("End screen: waiting for party owner")
+                waitingLogged := true
+            } else if reward.summaryNextConfirmed && reward.beats < 5 {
+                ; Keep the reward cadence if the menu appears early. Every
+                ; following beat rechecks for a reward without clicking the menu.
+                reward.beats++
+            } else if (route := RouteResultChoice(view,choice)) {
+                return route
             }
-            ProcessLog("Tìm thấy End Choice - Chế độ hiện tại: " mode)
-
-            ClickCapysEndBtn(bx, fallbackAction := "") {
-                if (bx > 0 && CapysGetClientBox(&cx, &cy, &cw, &ch, &tw2)) {
-                    if !WinActive("ahk_id " tw2) {
-                        WinActivate("ahk_id " tw2)
-                        Sleep(150)
-                    }
-                    sx := cw / 800, sy := ch / 599
-                    oldMode := A_CoordModeMouse
-                    CoordMode "Mouse", "Screen"
-                    try {
-                        waitUntil := A_TickCount + 15000
-                        lastClickAt := 0
-                        clicks := 0
-                        while (A_TickCount < waitUntil) {
-                            if (clicks < 4 && (lastClickAt = 0 || A_TickCount - lastClickAt >= 1200)) {
-                                if CapysGetClientBox(&cx, &cy, &cw, &ch, &tw2) {
-                                    sx := cw / 800, sy := ch / 599
-                                    FixClick(cx + Round(bx * sx), cy + Round(121 * sy))
-                                }
-                                lastClickAt := A_TickCount
-                                clicks++
-                            }
-                            Sleep(450)
-                            if (fallbackAction != "lobby" && (FindVoteStart(&vx, &vy) || CapysReadWave() >= 1 || RegularMatchHudVisible() || SummerMatchStarted()))
-                                return true
-                            if (fallbackAction = "lobby" && FindText(&ax, &ay, 746, 514, 789, 530, 0, 0, AreaText))
-                                return true
-                            if (!IsObject(CapysReadChoice()) && !FindText(&lx, &ly, 80, 85, 739, 224, 0, 0, LobbyText "|" LobbyText2))
-                                return true
-                        }
-                    } finally CoordMode "Mouse", oldMode
-                    return !IsObject(CapysReadChoice()) || (FindVoteStart(&vx, &vy) || CapysReadWave() >= 1 || RegularMatchHudVisible() || SummerMatchStarted())
-                }
-                if CapysGetClientBox(,,,, &tw2) && !WinActive("ahk_id " tw2) {
-                    WinActivate("ahk_id " tw2)
-                    Sleep(150)
-                }
-                if (fallbackAction = "lobby")
-                    return ClickReturnToLobby()
-                if (fallbackAction = "next")
-                    return ClickNextLevel()
-                return ClickReplay()
-            }
-
-            if (MatchMaking.Value || ReturnLobbyBox.Value) {
-                ProcessLog("Return Lobby")
-                ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                return CheckLobby()
-            }
-
-            if (mode = "Story") {
-                ProcessLog("Handling Story end")
-                if (StoryActDropdown.Text != "Infinity") {
-                    if (NextLevelBox.Value && lastResult = "win") {
-                        ProcessLog("Next match")
-                        ClickCapysEndBtn(hasCapysChoice ? capysChoice["nextLevelX"] : 0, "next")
-                    } else {
-                        ProcessLog("Replay")
-                        ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                    }
-                    return "replay"
-                } else {
-                    ProcessLog("Story Infinity Return")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                    return CheckLobby()
-                }
-            }
-            else if (mode = "Portal" || mode = "Daily Infinite Quest") {
-                ProcessLog("Return Lobby")
-                ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                return CheckLobby()
-            }
-            else if (mode = "Farm") {
-                ProcessLog("Handling Farm end: Replay")
-                ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                return "replay"
-            }
-            else if (mode = "Raid") {
-                ProcessLog("Handling Raid end")
-                if (ReturnLobbyBox.Value) {
-                    ProcessLog("Return Lobby")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                    return CheckLobby()
-                } else {
-                    ProcessLog("Replay Raid")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                    return "replay"
-                }
-            }
-            else if (mode = "Infinity Castle") {
-                ProcessLog("Handling Infinite Castle: Replay")
-                ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                return "replay"
-            }
-            else if (mode = "Infinity Mansion") {
-                ProcessLog("Handling Infinity Mansion end")
-                if (NextRoomBox.Value && lastResult = "win") {
-                    ProcessLog("Next Room")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["nextLevelX"] : 0, "next")
-                } else {
-                    ProcessLog("Replay Mansion")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                }
-                return "replay"
-            }
-            else if (mode = "Summer Event") {
-                ProcessLog("Handling Summer Event end")
-                if (ReturnLobbyBox.Value) {
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                    return CheckLobby()
-                }
-                ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                return "replay"
-            }
-            else if (mode = "Misty Village" || mode = "Misty Infinite") {
-                ProcessLog("Handling " . mode . " end")
-                if (lastResult = "lose" || ReturnLobbyBox.Value) {
-                    ProcessLog(mode . ": returning to lobby (defeat or ReturnLobby checked)")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                    return CheckLobby()
-                }
-                if (NextLevelBox.Value) {
-                    ProcessLog(mode . ": Next Floor")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["nextLevelX"] : 0, "next")
-                } else {
-                    ProcessLog(mode . ": Replay")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                }
-                return "replay"
-            }
-            else {
-                ProcessLog("Handling default end action")
-                if (ReturnLobbyBox.Value) {
-                    ProcessLog("Return Lobby")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["lobbyX"] : 0, "lobby")
-                    return CheckLobby()
-                } else {
-                    ProcessLog("Replay")
-                    ClickCapysEndBtn(hasCapysChoice ? capysChoice["replayX"] : 0, "replay")
-                    return "replay"
-                }
-            }
+        } else if !LobbyEntryPattern(view,LobbyText "|" LobbyText2,[80,85,739,224],&x,&y) && IsMacroLobbyVisible() {
+            return "lobby"
         }
-
-        ; If neither NextText nor LobbyText found, click Capys summary Next button at (319, 394)
-        beatsWithoutButton++
-        if (beatsWithoutButton >= 3) {
-            beatsWithoutButton := 0
-            if CapysGetClientBox(&cx, &cy, &cw, &ch, &tw2) {
-                if !WinActive("ahk_id " tw2)
-                    try WinActivate("ahk_id " tw2)
-                sx := cw / 800, sy := ch / 599
-                oldMode := A_CoordModeMouse
-                CoordMode "Mouse", "Screen"
-                try FixClick(cx + Round(319 * sx), cy + Round(394 * sy))
-                finally CoordMode "Mouse", oldMode
-            }
-        }
+        Sleep(500)
     }
 
     ProcessLog("End screen: timeout; recovering to lobby")
-    if (ok := FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText))
-        return CheckLobby()
     return RecoverToLobby()
 }
 
-ProcessMatchResult() {
-    global Wins, loss, mode, stageStartTime, lastResult, MatchMaking
-    ProcessLog("Checking win/loss status...")
-    stageLength := FormatStageTime(A_TickCount - stageStartTime)
+DismissResultUnitPanel(view := 0) {
+    global UnitExit
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view) || !LobbyEntryPattern(view,UnitExit,[300,190,360,250],&x,&y)
+        return false
+    if !WorldClick(view,x-4,y-35)
+        return false
+    Sleep(300)
+    return true
+}
 
-    CloseUnitPanel()
-    if (ok := FindText(&X, &Y, 300, 190, 360, 250, 0, 0, UnitExit)) {
-        ClickUntilGone(0, 0, 300, 190, 360, 250, UnitExit, -4, -35)
-    }
-
-    capysRes := CapysReadResult()
-    if capysRes = "victory" {
-        ProcessLog("Victory detected - Stage Length: " stageLength)
-        Wins += 1
-        lastResult := "win"
-        SendWebhookWithTime(true, stageLength)
-        if CapysGetClientBox(&cx, &cy, &cw, &ch) {
-            oldM := A_CoordModeMouse
-            CoordMode "Mouse", "Screen"
-            try FixClick(cx + Round(319 * cw / 800), cy + Round(394 * ch / 599))
-            finally CoordMode "Mouse", oldM
-        }
-    } else if capysRes = "defeat" {
-        ProcessLog("Defeat detected - Stage Length: " stageLength)
-        loss += 1
-        lastResult := "lose"
-        SendWebhookWithTime(false, stageLength)
+HandleDungeonDeathScreen(view := 0) {
+    global mode
+    if mode != "Dungeon"
+        return false
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !ReadDungeonDeath(view)
+        return false
+    RecordMatchResult("defeat")
+    if IsMacroLobbyVisible() {
+        if WorldClick(view,400,383) && WaitForResultTransition("lobby")
+            return "lobby"
     } else {
-        lastResult := "unknown"
-        ProcessLog("End screen visible; win/loss title unreadable")
+        WorldClick(view,670,147)
     }
+    Sleep(500)
+    return "handled"
+}
 
-    if (mode = "Dungeon" && !MatchMaking.Value)
-        return MonitorDungeonEnd()
+ReadResultRewardScreen(view := 0) {
+    global NextText
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return {kind:"",result:""}
+    if CapysReadReward()
+        return {kind:"reward",result:""}
+    result := CapysReadResult(&nextVisible)
+    hasNext := nextVisible || LobbyEntryPattern(view,NextText,[260,400,390,450],&x,&y)
+    return {kind:hasNext ? "summary" : "",result:result}
+}
+
+AdvanceResultReward(view := 0, progress := 0, screen := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if !IsObject(progress)
+        progress := {beats:0,summaryNextConfirmed:false}
+    if !IsObject(screen)
+        screen := ReadResultRewardScreen(view)
+
+    if screen.kind = "reward" {
+        atSummary := progress.summaryNextConfirmed && progress.beats < 5
+        if WorldClick(view,atSummary ? 319 : 400,atSummary ? 394 : 450)
+            progress.beats++
+        Sleep(500)
+        return true
+    }
+    if screen.kind != "summary"
+        return false
+
+    if WorldClick(view,319,394) {
+        progress.summaryNextConfirmed := true
+        progress.beats++
+    }
+    Sleep(500)
+    return true
+}
+
+RouteResultChoice(view := 0, choice := 0) {
+    global mode
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view) || CapysReadReward()
+        return false
+    if !IsObject(choice)
+        choice := CapysReadChoice(false)
+    if !IsObject(choice) || choice["ownerWait"]
+        return false
+
+    oldWave := CapysReadWave()
+    for route in ResultActionOrder() {
+        if !TryConfirmedResultAction(view,choice,route)
+            continue
+        dungeonReplay := mode = "Dungeon" && route = "replay"
+        transition := WaitForResultTransition(route,oldWave,dungeonReplay)
+        if !transition {
+            ProcessLog("End screen: no confirmed transition after " route)
+            return false
+        }
+        if route = "dungeon" || transition = "dungeon"
+            return ContinueDungeonAfterResult()
+        return route = "lobby" ? "lobby" : "replay"
+    }
+    ProcessLog("End screen: choice buttons visible but no route action matched (lobbyX=" choice["lobbyX"] ", replayX=" choice["replayX"] ")")
+    return false
+}
+
+ContinueDungeonAfterResult() {
+    CheckDungeonSpecials()
+    finish := CheckForFinishDungeon()
+    return finish ? finish : SelectDungeonRoute()
+}
+
+RecordMatchResult(result) {
+    global ResultCounted, Wins, loss, stageStartTime, lastResult
+    if ResultCounted
+        return
+    ResultCounted := true
+    win := result = "victory"
+    lastResult := win ? "win" : "lose"
+    if win
+        Wins++
+    else
+        loss++
+    duration := FormatStageTime(A_TickCount - stageStartTime)
+    ProcessLog((win ? "Victory" : "Defeat") " detected (" duration ")")
+    try SendWebhookWithTime(win, duration)
+    catch
+        ProcessLog("Match report could not be sent")
+}
+
+ResultActionOrder() {
+    global mode, StoryActDropdown, ReturnLobbyBox, MatchMaking, ReplayBox, NextLevelBox, NextRoomBox, lastResult
+    if mode = "Farm"
+        return ["replay", "lobby"]
+    if ReturnLobbyBox.Value || (ModeAllowsMatchmaking(mode) && MatchMaking.Value)
+        || mode = "Portal" || mode = "Daily Infinite Quest" || mode = "Cursed Womb"
+        return ["lobby"]
+    if mode = "Dungeon" {
+        if lastResult = "lose"
+            return ["lobby"]
+        return lastResult = "win" && ReplayBox.Value ? ["dungeon", "replay", "lobby"] : ["dungeon", "lobby"]
+    }
+    if (mode = "Story" && StoryActDropdown.Text = "Infinity")
+        return ["lobby"]
+    misty := mode = "Misty Village" || mode = "Misty Infinite"
+    if misty && lastResult = "lose"
+        return ["lobby"]
+
+    actions := []
+    if lastResult = "win" {
+        if mode = "Infinity Mansion" && NextRoomBox.Value
+            actions.Push("nextRoom")
+        else if mode = "Story" && NextLevelBox.Value
+            actions.Push("nextLevel")
+        else if misty && NextLevelBox.Value
+            actions.Push("nextFloor")
+    }
+    if ReplayBox.Value
+        actions.Push("replay")
+    actions.Push("lobby")
+    return actions
+}
+
+TryConfirmedResultAction(view, choice, route) {
+    buttonX := choice["nextLevelX"]
+    switch route {
+        case "lobby":
+            if !choice["lobbyX"]
+                return false
+            buttonX := choice["lobbyX"]
+            pattern := "^return\s+to\s+lobb"
+        case "replay":
+            if !choice["replayX"] || choice["hasNextPortal"]
+                return false
+            buttonX := choice["replayX"]
+            pattern := "^(replay|repeat|retry)$"
+        case "dungeon":
+            if !choice["hasOpenDungeon"]
+                return false
+            buttonX := 488
+            pattern := "^open\s+dungeon$"
+        case "nextRoom":
+            if !choice["hasNextRoom"]
+                return false
+            pattern := "^next\s+room$"
+        case "nextFloor":
+            if !choice["hasNextFloor"]
+                return false
+            pattern := "^next\s+fl[o0]{2}r$"
+        case "nextLevel":
+            if !choice["hasNextLevel"]
+                return false
+            pattern := "^next\s+level$"
+        default:
+            return false
+    }
+    candidates := []
+    if buttonX > 0
+        candidates.Push(buttonX)
+    for x in [224,312,400,488,576] {
+        if x != buttonX
+            candidates.Push(x)
+    }
+    for x in candidates {
+        if LobbyEntryLabel(view,pattern,[x-74,96,148,54],true,1)
+            return true
+    }
+    if (route = "lobby" || route = "replay") {
+        for x in candidates {
+            if !WorldViewValid(view)
+                return false
+            norm := ""
+            try norm := CapysNormalize(ReadHighContrastText(view.x+Round((x-74)*view.sx),view.y+Round(96*view.sy)
+                ,Max(8,Round(148*view.sx)),Max(8,Round(54*view.sy)),3,0,false,true))
+            if (route = "lobby" && (RegExMatch(norm,"returnt[o0]l[o0]bb") || (InStr(norm,"return") && CapysButtonPillKind(x) = "green")))
+                || (route = "replay" && RegExMatch(norm,"replay|retry"))
+                return WorldClick(view,x,121)
+        }
+    }
+    return false
+}
+
+WaitForResultTransition(route, oldWave := -1, dungeonReplay := false) {
+    global TransitionCoverMap
+    TransitionCoverMap := ""
+    deadline := A_TickCount + (route = "lobby" ? 60000 : 90000)
+    menuDeadline := A_TickCount + 18000
+    cleanReads := 0
+    coverMap := ""
+    lastView := 0
+    while A_TickCount < deadline {
+        Sleep(500)
+        view := LobbyEntryView()
+        if !WorldViewValid(lastView) {
+            cleanReads := 0
+            coverMap := ""
+        }
+        lastView := view
+        if !WorldViewValid(view)
+            continue
+        if CapysResultScreenVisible() {
+            cleanReads := 0
+            coverMap := ""
+            if A_TickCount >= menuDeadline
+                return false
+            continue
+        }
+        if route != "lobby" && route != "dungeon" && coverMap = ""
+            coverMap := ReadMatchLoadingCover()
+        if !WorldViewValid(view) {
+            cleanReads := 0
+            coverMap := ""
+            continue
+        }
+        if ++cleanReads < 2
+            continue
+        if route = "lobby" {
+            if IsMacroLobbyVisible() && WorldViewValid(view)
+                return true
+        } else if route = "dungeon" {
+            if DungeonRouteVisible() && WorldViewValid(view)
+                return true
+        } else if !IsMacroLobbyVisible() && WorldViewValid(view) {
+            if dungeonReplay && DungeonRouteVisible() && WorldViewValid(view)
+                return "dungeon"
+            if coverMap != "" && WorldViewValid(view) {
+                TransitionCoverMap := coverMap
+                return true
+            }
+            if FindVoteStart(&x, &y) && WorldViewValid(view)
+                return true
+            waveNow := CapysReadWave()
+            if (oldWave > 1 ? (waveNow = 1) : (cleanReads >= 3 && (waveNow = 1 || RegularMatchHudVisible() || SummerMatchStarted())))
+                && (RegularMatchHudVisible() || SummerMatchStarted()) && !CapysResultScreenVisible() && WorldViewValid(view)
+                return true
+        }
+    }
+    return false
+}
+
+ReadDungeonDeath(view) {
+    if !WorldViewValid(view)
+        return false
+    title := CapysNormalize(CapysOcrRect(255,205,300,65,3))
+    if !InStr(title,"youdied")
+        return false
+    label := CapysNormalize(CapysOcrRect(310,360,185,48,3))
+    if !WorldViewValid(view) || !InStr(label,"continue")
+        return false
+    oldMode := A_CoordModePixel
+    CoordMode "Pixel", "Screen"
+    try {
+        for x in [325,475] {
+            color := PixelGetColor(view.x+Round(x*view.sx),view.y+Round(375*view.sy))
+            green := (color>>8) & 255
+            if green < 90 || green < ((color>>16)&255)+30 || green < (color&255)+30
+                return false
+        }
+        return WorldViewValid(view)
+    } finally CoordMode "Pixel", oldMode
+}
+
+DungeonRouteVisible() {
+    global Enter, Shop, Shrine, ChestRoom, FinishDungeon
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    return LobbyEntryPattern(view,Shop "|" Shrine "|" ChestRoom,[140,200,375,250],&x,&y)
+        || LobbyEntryPattern(view,FinishDungeon,[240,180,565,480],&x,&y)
+        || (LobbyEntryPattern(view,Enter,[120,425,680,500],&x,&y)
+            && InStr(CapysNormalize(CapysOcrRect(180,185,440,185,2)),"dungeon"))
+}
+
+ProcessMatchResult() {
     return MonitorEndScreen()
 }
 
 MonitorStage() {
-    global Wins, loss, mode, StoryActDropdown, CARD_ENABLED, stageStartTime, lastResult
+    global mode, StoryActDropdown
 
     lastClickTime := A_TickCount
 
     loop {
         Sleep(1000)
 
-        ; Card picker (GAME layer)
-        if CARD_ENABLED {
-            WaitForCardChoice(mode)
-        }
-
-        if ((mode = "Story" && StoryActDropdown.Text = "Infinity") || (mode = "Farm") || (mode = "Daily Infinite Quest")) {
-            timeElapsed := A_TickCount - lastClickTime
-            if (timeElapsed >= 300000) {  ; 5 minutes
-                ProcessLog("Processing for Anti-AFK...")
-                FixClick(560, 560) ; Move click
-
-                ; mahogora ability checker
-                FixClick(239, 400)
-                FixClick(298, 400)
-                FixClick(358, 400)
-
-                if (FindText(&x, &y, 0, 0, A_ScreenWidth, A_ScreenHeight, 0, 0, Wave40Inf)) {
-                    Wave40Reached()
-                }
-
-                lastClickTime := A_TickCount
-            }
-        }
-
-        if (CapysResultScreenVisible()) {
-            return ProcessMatchResult()
-        }
-
+        if CapysResultScreenVisible()
+            return HandleStageResult()
         Reconnect(&reconnected)
         if reconnected
             return "reconnected"
+        if mode = "Summer Event"
+            ServiceSummerCards()
+        if mode = "Daily Infinite Quest" && (route := DailyInfiniteWaveRoute())
+            return route
+
+        if A_TickCount - lastClickTime >= 300000 && UnitActionAllowed(true) {
+            view := LobbyEntryView()
+            if IsObject(view) && WorldClick(view,638,549) {
+                lastClickTime := A_TickCount
+                ProcessLog("Match monitor: anti-idle click")
+            }
+            if (mode = "Story" && StoryActDropdown.Text = "Infinity") || mode = "Daily Infinite Quest" {
+                for x in [239,298,358] {
+                    if !UnitActionAllowed(true) || !IsObject(view) || !WorldClick(view,x,400)
+                        break
+                }
+            }
+        }
     }
 }
 
@@ -2229,221 +2441,293 @@ StoryMovement() {
     return IsObject(WorldSelectorState())
 }
 
-;go to Walled City for worthy farm
-
-FarmMovement() {
-    global rblxID, aaMainUIHwnd
-
-    WinSetAlwaysOnTop(false, "ahk_id " aaMainUIHwnd)
-    if WinExist(rblxID)
-        WinActivate(rblxID)
-    Sleep(150)
-    oldMouseMode := A_CoordModeMouse
-    CoordMode "Mouse", "Screen"
-    FixClick(85, 330) ; click Play in the current lobby layout
-    CoordMode "Mouse", oldMouseMode
-    sleep (1000)
-
-    ;move to game choose
-    SendInput ("{w down}")
-    Sleep(300)
-    SendInput ("{w up}")
-    Sleep(300)
-    SendInput ("{d down}")
-    SendInput ("{w down}")
-    Sleep(4500)
-    SendInput ("{d up}")
-    SendInput ("{w up}")
-    Sleep(500)
-    FixClick(640, 70)
-
-    ;enter nav mode
-    SendInput("{LShift down}\{LShift up}")
-    Sleep(500)
-
-    ;select farm mode
-    loop 3 {
-        SendInput("{s}")
-        Sleep(500)
+DailyInfiniteWaveRoute() {
+    global DailyQuestMap, stageStartTime
+    static tick := 0, match := -1, reads := 0, lastView := 0
+    if match != stageStartTime {
+        match := stageStartTime
+        tick := 0
+        reads := 0
+        lastView := 0
     }
+    if DailyQuestMap = "" || A_TickCount < tick
+        return false
+    tick := A_TickCount + 900
+    if !WorldViewValid(lastView)
+        reads := 0
+    view := LobbyEntryView()
+    lastView := view
+    if !WorldViewValid(view) || CapysReadWave() < 40 || !WorldViewValid(view) {
+        reads := 0
+        return false
+    }
+    if ++reads < 2
+        return false
 
-    ;choose farm mode
-    SendInput("{Enter}")
-    Sleep(500)
+    reads := 0
+    if !UnitActionAllowed(true) || ReadInfiniteMatchMap() != DailyQuestMap || !WorldViewValid(view)
+        return false
 
-    ;exit nav mode
-    SendInput("{LShift down}\{LShift up}")
-    Sleep(500)
+    ProcessLog("Daily Infinite Quest: Wave 40 reached on " DailyQuestMap)
+    route := StartDailyLoseVote(view) ? FinishDailyLoseVote(view) : RecoverDailyLoseVote()
+    tick := A_TickCount + 10000
+    return route
 }
 
-Wave40Reached(&handled := false) {
-    handled := false
-    global rblxID, ShowUpgradeUIOnLeftImg, mode, MatchMaking
-    if (mode = "Summer Event" && !MatchMaking.Value)
-        return false
-
-    ; This function is also called while placing units. Do not inspect or click
-    ; the lobby teleport menu unless Wave 40 is actually visible.
-    if !FindText(&x, &y, 186, 97, 256, 124, 0, 0, Wave40Inf)
-        return false
-    ProcessLog("Wave 40 has been reached")
-    oldMouseMode := A_CoordModeMouse
-    CoordMode "Mouse", "Client"
-    settingsOpened := false
-    targetImg := IsSet(ShowUpgradeUIOnLeftImg) ? ShowUpgradeUIOnLeftImg : "Images\ShowUpgradeUIOnLeft_Text.png"
-    try {
-        FixClick(26, 570) ; open settings
-        settingsOpened := true
-        Sleep(700)
-
-        ; The panel reopens wherever it was last scrolled, so reset to the top
-        ; before stepping down. FixMove is required: Roblox ignores wheel input
-        ; until it has processed a fresh mouse-move at that position.
-        FixMove(400, 300)
-        Sleep(150)
-        loop 10 {
-            SendInput("{WheelUp}")
-            Sleep(110)
+FinishDailyLoseVote(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    deadline := A_TickCount + 30000
+    voted := false
+    allowVote := WorldViewValid(view)
+    while A_TickCount < deadline {
+        if !WorldViewValid(view) {
+            allowVote := false
+            view := LobbyEntryView()
         }
-        Sleep(1200)
-        WinActivate(rblxID)
-        Sleep(200)
-
-        ; "Return to Lobby" sits two rows below "Show Upgrade UI on left", so
-        ; locate that row and offset to its button. The row also has to sit high
-        ; enough for the button underneath to still be inside the panel.
-        foundX := 0
-        foundY := 0
-        ready := false
-        loop 16 {
-            if ImageSearch(&foundX, &foundY, 200, 150, 620, 460, "*60 " targetImg) {
-                if (foundY <= 290) {
-                    probeX := foundX
-                    probeY := foundY
-                    Sleep(650)
-                    if (ImageSearch(&foundX, &foundY, 200, 150, 620, 460, "*60 " targetImg)
-                        && foundX = probeX && foundY = probeY && foundY <= 290) {
-                        ready := true
-                        break
-                    }
-                }
-            }
-            FixMove(400, 300)
-            SendInput("{WheelDown}")
-            Sleep(320)
+        if WorldViewValid(view) {
+            if CapysResultScreenVisible()
+                return FormatHandledRoute(HandleStageResult())
+            if allowVote && !voted
+                voted := ConfirmDailyLoseVote(view)
         }
+        Sleep(350)
+    }
+    ProcessLog("Daily Infinite Quest: Vote to Lose did not finish the match")
+    return RecoverDailyLoseVote()
+}
 
-        if !ready {
-            ProcessLog("Could not find 'Show Upgrade UI on left' in Settings")
+ConfirmDailyLoseVote(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsDailyLoseVoteOpen(view) || CapysResultScreenVisible()
+        return false
+    if !LobbyEntryLabel(view,"^vote$",[329,304,70,35],true,1)
+        return false
+    ProcessLog("Daily Infinite Quest: confirmed Vote to Lose")
+    return true
+}
+
+IsDailyLoseVoteOpen(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    return WorldViewValid(view) && RegExMatch(CapysOcrRect(330,259,145,49,3),"i)\bvote\s+to\s+lose\b")
+        && WorldViewValid(view)
+}
+
+DismissDailyLoseVote(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if IsDailyLoseVoteOpen(view) {
+        if !LobbyEntryLabel(view,"^(?:cancel|no)$",[329,304,145,35],true,1)
             return false
-        }
+        Sleep(350)
+        if !WorldViewValid(view) || IsDailyLoseVoteOpen(view)
+            return false
+    }
+    if IsMatchSettingsOpen(view) {
+        if !CloseMatchSettings(view)
+            return false
+        Sleep(350)
+    }
+    loop 2 {
+        if !WorldViewValid(view) || IsDailyLoseVoteOpen(view) || IsMatchSettingsOpen(view)
+            return false
+        if A_Index = 1
+            Sleep(350)
+    }
+    return WorldViewValid(view)
+}
 
-        ; Measured on the live panel: the toggle centre is foundY + 27 and the
-        ; Return to Lobby button sits another 109px below that.
-        lobbyX := foundX + 287
-        lobbyY := foundY + 136
-        WinActivate(rblxID)
-        Sleep(150)
-        FixClick(lobbyX, lobbyY)
-        Sleep(1800)
-        settingsOpened := false
-        ProcessLog("Clicked Return to Lobby")
-        handled := true
-        return CheckLobby()
-    } finally {
-        if (settingsOpened) {
-            FixClick(581, 157) ; close settings
-            Sleep(250)
-        }
-        CoordMode "Mouse", oldMouseMode
+RecoverDailyLoseVote() {
+    view := LobbyEntryView()
+    if WorldViewValid(view) {
+        if CapysResultScreenVisible()
+            return FormatHandledRoute(HandleStageResult())
+        if IsMacroLobbyVisible()
+            return "lobby"
+        if DismissDailyLoseVote(view)
+            return false
+    }
+    ProcessLog("Daily Infinite Quest: could not verify the vote and Settings closed; returning for recovery")
+    return "handled"
+}
+
+ReadInfiniteMatchMap() {
+    title := CapysOcrRect(160,12,493,45,3)
+    if RegExMatch(title,"i)(.+?)\s+infinite\s+mode",&m)
+        return ResolveInfiniteQuestMap(Trim(m[1]))
+    return ""
+}
+
+StartDailyLoseVote(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !OpenMatchSettings(view) {
+        ProcessLog("Daily Infinite Quest: Settings did not open")
+        return false
+    }
+    if ClickVoteToLoseRow(view)
+        return true
+    CloseMatchSettings(view)
+    return false
+}
+
+OpenMatchSettings(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if IsMatchSettingsOpen(view)
+        return true
+    return WorldClick(view,26,570) && LobbyEntryLabel(view,"^settings$",[220,132,150,49])
+}
+
+IsMatchSettingsOpen(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    return WorldViewValid(view) && LobbyEntryLabel(view,"^settings$",[220,132,150,49],false,1)
+}
+
+CloseMatchSettings(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    return IsMatchSettingsOpen(view) && WorldClick(view,581,148)
+}
+
+ClickVoteToLoseRow(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsMatchSettingsOpen(view) || !ScrollMacroPanel(view,405,334,"up",12)
+        return false
+    loop 15 {
+        if !IsMatchSettingsOpen(view) || CapysResultScreenVisible()
+            return false
+        rowY := FindVoteToLoseRow(view)
+        if rowY && !CapysResultScreenVisible()
+            return WorldClick(view,522,rowY)
+        if !ScrollMacroPanel(view,405,334,"down",1)
+            return false
+    }
+    ProcessLog("Daily Infinite Quest: Vote to Lose was not found in Settings")
+    return false
+}
+
+FindVoteToLoseRow(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsMatchSettingsOpen(view)
+        return false
+    region := [226,188,260,253]
+    lines := WorldReadRegion(view,region*)
+    if !IsObject(lines)
+        return false
+    for line in lines.Lines {
+        if CapysNormalize(line.Text) != "votetolose"
+            continue
+        y := region[2]+(line.y+line.h/2)/view.sy+6
+        if y >= 202 && y <= 431 && WorldViewValid(view)
+            return y
     }
     return false
 }
 
-PortalSearch() { ; try to search portal in items bags
-    DemonsPlaceColor := 0xFF60FF
-    ShibuyaColor := 0x86FEFF
-    ProcessLog("Searching for Portal...")
-    Sleep(500)
-    FixClick(40, 310) ;click Items
-    Sleep(1500)
-    FixClick(446, 225) ;click Portals Page
-    Sleep(1500)
-
-    ;scroll down to find portal
-    MouseMove(442, 415, 10)
-    if (PortalDropdown.Text = "Shibuya District") {
-        while !((FindText(&x, &y, 171, 237, 634, 485, 0, 0, ShibuyaPortal)) && (PixelSearch(&foundX, &foundY, 171, 237,
-            634, 485, ShibuyaColor, 0))) {
-            Sleep(1500)
-            loop {
-                Send ("{WheelDown}")
-                if (FindText(&x, &y, 171, 237, 634, 485, 0, 0, ShibuyaPortal)) && (PixelSearch(&foundX, &foundY, 171,
-                    237, 634, 485, ShibuyaColor, 0)) {
-                    break
-                }
-                Sleep(2000)
-            }
-        }
-        FixClick(x, y)
-        Sleep(1500)
-    } else if (PortalDropdown.Text = "Demons Leader Place") {
-        while !((FindText(&x, &y, 171, 237, 634, 485, 0, 0, DemonsPlacePortal)) && (PixelSearch(&x, &y, 171, 237, 634,
-            485, DemonsPlaceColor, 0))) {
-            Sleep(1500)
-            loop {
-                Send ("{WheelDown}")
-                if (FindText(&x, &y, 171, 237, 634, 485, 0, 0, DemonsPlacePortal)) && (PixelSearch(&x, &y, 171, 237,
-                    634, 485, DemonsPlaceColor, 0)) {
-                    break
-                }
-                Sleep(2000)
-            }
-            Sleep(1500)
-        }
-        FixClick(x, y)
-        Sleep(500)
-    }
-    Sleep(1500)
+LobbyEntryView() {
+    if !CapysGetClientBox(&x,&y,&w,&h,&hwnd) || !WinActive("ahk_id " hwnd)
+        return false
+    return {window:hwnd, x:x, y:y, w:w, h:h, sx:w/800, sy:h/599}
 }
 
-PortalMovement() {
-    ProcessLog("Portal navigation: Items route (36, 297)")
-    FixClick(36, 297)  ; Items
-    Sleep(600)
-    FixClick(533, 227) ; Portal tab
-    Sleep(600)
-    FixClick(486, 186) ; Search
-    Sleep(600)
-    FixClick(216, 287) ; First portal select
-    Sleep(600)
-    FixClick(253, 353) ; Use/Open portal
-    Sleep(600)
-    FixClick(400, 465) ; Start
-    Sleep(1000)
-    ProcessLog("Opened a Portal, joining in...")
+LobbyEntryPattern(view, pattern, region, &x, &y) {
+    if !WorldViewValid(view) || !FindText(&px,&py,view.x+Round(region[1]*view.sx),view.y+Round(region[2]*view.sy),
+        view.x+Round(region[3]*view.sx),view.y+Round(region[4]*view.sy),0,0,pattern,1,0,0,20,10,1,view.sx,view.sy)
+        return false
+    x := (px-view.x)/view.sx, y := (py-view.y)/view.sy
+    return WorldViewValid(view)
 }
 
-FoundMapType() { ; just use for infinite daily quest mode
-    global TextColor := 0xFCCF00
-
-    if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, SandInf)) {
-        return 5
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, FiendInf)) {
-        return 7
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, AntKingdomInf)) {
-        return 9
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, MagicTownInf)) {
-        return 10
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, PuppetInf)) {
-        return 17
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, DungeonThroneInf)) {
-        return 20
-    } else if (FindText(&X1, &Y1, 214, 191, 587, 512, 0, 0, ShibuyaInf)) {
-        return 23
-    } else {
-        return 0 ; Không tìm thấy map
+LobbyEntryLabel(view, pattern, region, click := false, attempts := 12) {
+    loop attempts {
+        if !WorldViewValid(view)
+            return false
+        ui := WorldReadRegion(view,region*)
+        if IsObject(ui) {
+            for line in ui.Lines {
+                normLine := RegExReplace(StrLower(Trim(line.Text)), "\brepeat\b", "replay")
+                if !RegExMatch(normLine, pattern)
+                    continue
+                if !click
+                    return WorldViewValid(view)
+                return WorldClick(view,region[1]+(line.x+line.w/2)/view.sx,
+                    region[2]+(line.y+line.h/2)/view.sy)
+            }
+        }
+        if A_Index < attempts
+            Sleep(150)
     }
+    if attempts > 1
+        ProcessLog("Lobby entry: control unavailable (" pattern ")")
+    return false
+}
+
+LobbyEntryStartSolo(view) {
+    if !LobbyEntryLabel(view,"^(select|start)$",[332,406,135,57],true)
+        || !LobbyEntryLabel(view,"^play here$",[252,293,159,93],true)
+        || !LobbyEntryLabel(view,"^start$",[288,424,225,78],true)
+        return false
+    return true
+}
+
+PortalSearch(view?, name := "") {
+    global PortalDropdown, ShibuyaPortal, DemonsPlacePortal
+    if !IsSet(view)
+        view := LobbyEntryView()
+    if name = ""
+        name := PortalDropdown.Text
+    if !IsObject(view) || (name != "Shibuya District" && name != "Demons Leader Place")
+        return false
+
+    ProcessLog("Portal: searching inventory for " name)
+    if !WorldClick(view,36,297)
+        return false
+    Sleep(600)
+    if !WorldClick(view,533,227)
+        return false
+    Sleep(600)
+    if !WorldClick(view,486,186)
+        return false
+    Sleep(600)
+    if !WorldViewValid(view)
+        return false
+    SendEvent("^a")
+    if !WorldViewValid(view)
+        return false
+    SendText(name = "Shibuya District" ? "Shibuya" : "Demon")
+    pattern := name = "Shibuya District" ? ShibuyaPortal : DemonsPlacePortal
+    loop 10 {
+        Sleep(200)
+        if !WorldViewValid(view)
+            return false
+        if LobbyEntryPattern(view, pattern, [171,237,634,485], &x, &y)
+            return WorldClick(view,x,y)
+    }
+    ProcessLog("Portal: requested item icon unavailable: " name)
+    return false
+}
+
+PortalMovement(name := "") {
+    view := LobbyEntryView()
+    if !IsObject(view) || !PortalSearch(view,name)
+        return false
+    ; Capys separates the item Use action from the Open confirmation and queue Start.
+    if !LobbyEntryLabel(view, "^use$", [150,237,500,250], true)
+        || !LobbyEntryLabel(view, "^open$", [186,320,142,72], true)
+        || !LobbyEntryLabel(view, "^start$", [298,425,208,83], true)
+        return false
+    ProcessLog("Portal: selected item and started its queue")
+    return true
 }
 
 EnterNavMode(steps) {
@@ -2458,111 +2742,390 @@ EnterNavMode(steps) {
     SendInput("{LShift down}\{LShift up}") ; disable nav key
 }
 
-InfQuestMovement() {
-    FixClick(640, 70) ; close player board
-    Sleep(500)
-    FixClick(770, 280) ; open quest
-    Sleep(500)
-    FixClick(453, 157) ; choose inf quest
-    Sleep(500)
-    if (FindText(&x, &y, 216, 190, 587, 516, 0, 0, ClaimText)) { ; claim reward
-        loop 5 {
-            FixClick(x, y - 30)
-            Sleep(500)
+ReadDailyInfiniteQuests() {
+    view := LobbyEntryView()
+    if !IsObject(view) || !DismissLobbyPopups(view) {
+        ProcessLog("Daily Infinite Quest: lobby popup check interrupted")
+        return false
+    }
+    if !OpenDailyQuestPanel(view) {
+        ProcessLog("Daily Infinite Quest: Your Quests did not open")
+        return false
+    }
+    quests := false
+    try {
+        if SelectInfiniteQuestTab(view)
+            quests := CollectInfiniteQuestRewards(view)
+        else
+            ProcessLog("Daily Infinite Quest: Infinite tab could not be selected")
+    } finally {
+        panelClosed := CloseDailyQuestPanel(view)
+    }
+    if !panelClosed {
+        ProcessLog("Daily Infinite Quest: Your Quests did not close")
+        return false
+    }
+    return quests
+}
+
+CollectInfiniteQuestRewards(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    loop 10 {
+        scan := ScanInfiniteQuestList(view)
+        if !IsObject(scan)
+            return false
+        if !IsObject(scan.claimable) {
+            for quest in scan.quests
+                ProcessLog("Daily Infinite: " quest.map " Wave " quest.wave " is " quest.status)
+            return scan.quests
+        }
+        if !ClaimVisibleInfiniteQuest(view,scan.claimable) {
+            ProcessLog("Daily Infinite Quest: Claim button could not be confirmed")
+            return false
+        }
+        Sleep(400)
+    }
+    ProcessLog("Daily Infinite Quest: claim did not settle")
+    return false
+}
+
+DismissLobbyPopups(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    DismissVillageShopPopup(view)
+    return WorldClearLobbyNotices(view) && DismissPromoPopups(4,view)
+}
+
+OpenDailyQuestPanel(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if IsDailyQuestPanelOpen(view)
+        return true
+    return LobbyEntryLabel(view,"^quests$",[731,230,69,62],true)
+        && LobbyEntryLabel(view,"^your\s+quests$",[208,92,200,38])
+}
+
+IsDailyQuestPanelOpen(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    return WorldViewValid(view) && LobbyEntryLabel(view,"^your\s+quests$",[208,92,200,38],false,1)
+}
+
+SelectInfiniteQuestTab(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    return IsDailyQuestPanelOpen(view) && LobbyEntryLabel(view,"^infinite$",[399,132,92,39],true)
+}
+
+CloseDailyQuestPanel(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+    if !IsDailyQuestPanelOpen(view)
+        return WorldViewValid(view)
+    if !WorldClick(view,592,99)
+        return false
+    Sleep(300)
+    return WorldViewValid(view) && !IsDailyQuestPanelOpen(view)
+}
+
+ScanInfiniteQuestList(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsDailyQuestPanelOpen(view) || !ScrollMacroPanel(view,505,410,"up",16)
+        return false
+    quests := Map()
+    order := []
+    loop 18 {
+        if !IsDailyQuestPanelOpen(view)
+            return false
+        for quest in ReadVisibleInfiniteTasks(view) {
+            key := quest.map "|" quest.wave
+            if !quests.Has(key)
+                order.Push(key)
+            quests[key] := quest
+            if quest.status = "claimable"
+                return {quests:[],claimable:quest}
+        }
+        if HasCompleteInfiniteQuestList(quests) {
+            ordered := []
+            for key in order
+                ordered.Push(quests[key])
+            return {quests:ordered,claimable:false}
+        }
+        if !ScrollMacroPanel(view,505,410,"down",1)
+            return false
+    }
+    ProcessLog("Daily Infinite Quest: " quests.Count " distinct rows read; expected Waves 10, 20 and 40 on three maps")
+    return false
+}
+
+HasCompleteInfiniteQuestList(quests) {
+    if quests.Count != 9
+        return false
+    maps := Map()
+    for key, quest in quests
+        maps[quest.map] := true
+    if maps.Count != 3
+        return false
+    for mapName in maps {
+        for wave in [10,20,40] {
+            if !quests.Has(mapName "|" wave)
+                return false
         }
     }
-    Sleep(1000)
-    mapSteps := 0
-    loop i := 1 {
-        found := FoundMapType()
-        if (found > 0) {
-            mapSteps := found
+    return true
+}
+
+ClaimVisibleInfiniteQuest(view := 0, task := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsDailyQuestPanelOpen(view)
+        return false
+    for current in ReadVisibleInfiniteTasks(view) {
+        if current.status != "claimable"
+            continue
+        if IsObject(task) && (current.map != task.map || current.wave != task.wave)
+            continue
+        return WorldClick(view,505,current.buttonY)
+    }
+    return false
+}
+
+ReadVisibleInfiniteTasks(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return []
+    region := [220,193,214,290]
+    left := WorldReadRegion(view,region*)
+    rows := []
+    if !IsObject(left)
+        return rows
+    seen := Map()
+    for prompt in ReadInfiniteQuestRowPrompts(left.Lines,region[2],view.sy) {
+        key := prompt.map "|" prompt.wave
+        if prompt.conflict || seen.Has(key)
+            continue
+        y := prompt.y
+        if y < 196 || y+75 > 484
+            continue
+        progress := CapysOcrRect(425,y-9,152,34,3)
+        button := CapysOcrRect(439,y+41,135,31,3)
+        if !WorldViewValid(view)
+            continue
+        status := ReadInfiniteQuestStatus(progress,button)
+        if status = ""
+            continue
+        rows.Push({map:prompt.map,wave:prompt.wave,status:status,buttonY:y+58})
+        seen[key] := true
+    }
+    return rows
+}
+
+ReadInfiniteQuestRowPrompts(lines, regionTop, scale) {
+    prompts := []
+    for index, line in lines {
+        prompt := ReadInfiniteQuestPromptLine(lines,index,scale)
+        if !IsObject(prompt)
+            continue
+        ; The measured description starts 25px below the title of the same card.
+        prompt.y := regionTop+Round(line.y/scale)-(prompt.description ? 25 : 0)
+        prompt.conflict := false
+        matched := false
+        for existing in prompts {
+            if Abs(existing.y-prompt.y) > 10
+                continue
+            if existing.map != prompt.map || existing.wave != prompt.wave
+                existing.conflict := true
+            if !prompt.description
+                existing.y := prompt.y
+            matched := true
+            break
+        }
+        if !matched
+            prompts.Push(prompt)
+    }
+    return prompts
+}
+
+ReadInfiniteQuestPromptLine(lines, index, scale) {
+    line := lines[index]
+    text := Trim(line.Text)
+    if !RegExMatch(text,"i)^(?:reach\s+)?wave")
+        return false
+    prompt := ParseInfiniteQuestPrompt(text)
+    if IsObject(prompt)
+        return prompt
+    loop Min(2,lines.Length-index) {
+        next := lines[index+A_Index]
+        fragment := Trim(next.Text)
+        if next.y <= line.y || (next.y-line.y)/scale > 30
+            || RegExMatch(fragment,"i)^(?:reach\s+wave|wave\s*[\dilo|]+|reward\b|progress\b)")
+            break
+        text .= " " fragment
+        prompt := ParseInfiniteQuestPrompt(text)
+        if IsObject(prompt)
+            return prompt
+    }
+    return false
+}
+
+ParseInfiniteQuestPrompt(text) {
+    text := Trim(RegExReplace(text,"\s+"," "))
+    text := Trim(RegExReplace(text,"i)\s*[\[(]?\s*infinite(?:\s+mode)?\s*[\])]?\s*$"))
+    description := RegExMatch(text,"i)^reach\s+wave\s*([124il|][0o])\s+[il]n\s+(.+)$",&match)
+    if !description && !RegExMatch(text,"i)^wave\s*([124il|][0o])(?:\s*[:;.\x{2013}\x{2014}-]\s*|\s+)(.+)$",&match)
+        return false
+    wave := Integer(RegExReplace(StrReplace(StrLower(match[1]),"o","0"),"[il|]","1"))
+    mapName := ResolveInfiniteQuestMap(match[2])
+    return mapName != "" ? {map:mapName,wave:wave,description:!!description} : false
+}
+
+ReadInfiniteQuestStatus(progress, button) {
+    if !RegExMatch(progress,"i)\b([01])\s*/\s*1\b",&m)
+        return ""
+    button := CapysNormalize(button)
+    if m[1] = "0"
+        return button = "incomplete" ? "pending" : ""
+    if RegExMatch(button,"^claim(?:reward)?$")
+        return "claimable"
+    return RegExMatch(button,"^(claimed|rewardclaimed|complete|completed)$") ? "done" : ""
+}
+
+ResolveInfiniteQuestMap(text) {
+    entry := WorldCardEntry(text,"main")
+    if IsObject(entry)
+        return entry["map"]
+    key := WorldTextKey(text)
+    if StrLen(key) < 7
+        return ""
+    match := "", best := StrLen(key) <= 8 ? 2 : 3
+    for world in WorldCatalog()["main"] {
+        nameKey := WorldTextKey(world["name"])
+        if Abs(StrLen(key)-StrLen(nameKey)) > best
+            continue
+        score := SummerQuantumDistance(key,nameKey)
+        if score < best {
+            match := world["map"]
+            best := score
+        } else if score = best
+            match := ""
+    }
+    return match
+}
+
+ScrollMacroPanel(view, x, y, direction, ticks) {
+    if !WorldViewValid(view)
+        return false
+    oldMode := A_CoordModeMouse
+    CoordMode "Mouse","Screen"
+    try {
+        FixMove(view.x+Round(x*view.sx),view.y+Round(y*view.sy))
+        Sleep(100)
+        loop ticks {
+            if !WorldViewValid(view)
+                return false
+            SendEvent(direction="up" ? "{WheelUp}" : "{WheelDown}")
+            Sleep(45)
         }
         Sleep(200)
-        i++
-    }
-
-    if (mapSteps > 0) {
-        FixClick(600, 130) ;close quest
-        ProcessLog("Found map, moving to Daily Inf Quest (A4103ms)")
-        MapWalk("a", 4103)
-        Sleep(500)
-        EnterNavMode(mapSteps)
-    } else {
-        ProcessLog("No map detected, moving to Farm")
-        return FarmMode()
-    }
-    Sleep(500)
+    } finally CoordMode "Mouse",oldMode
+    return WorldViewValid(view)
 }
 
-RaidMovement() {
-    FixClick(765, 475) ; Click Area
+RaidMovement(view?) {
+    if !IsSet(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    cards := "i)(Sacred Planet|Strange Town|Ruined City)"
+    if LobbyEntryLabel(view,cards,[612,205,185,251],false,1)
+        return true
+    if !WorldClick(view,765,475)
+        return false
     Sleep(300)
-    FixClick(495, 410)
+    if !WorldClick(view,495,410)
+        return false
     Sleep(500)
     ProcessLog("Raid navigation: A4123ms -> W1863ms")
-    MapWalk("a", 4123)
+    if !WorldViewValid(view) || !MapWalk("a",4123)
+        return false
     Sleep(150)
-    MapWalk("w", 1863)
-    Sleep(500)
+    if !WorldViewValid(view) || !MapWalk("w",1863)
+        return false
+    return LobbyEntryLabel(view,cards,[612,205,185,251])
 }
 
-InfCastleMovement() {
-    FixClick(765, 475) ;click Area
-    Sleep (300)
-    FixClick(370, 330)
-    Sleep (500)
-    SendInput ("{w down}")
-    Sleep (500)
-    SendInput ("{w up}")
-    Sleep (500)
-    SendInput ("{a down}")
-    sleep (4000)
-    SendInput ("{a up}")
-    Sleep (500)
+InfCastleMovement(view?) {
+    if !IsSet(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    labels := "i)^(normal|easy|hard)$"
+    if LobbyEntryLabel(view,labels,[330,343,220,63],false,1)
+        return true
+    if !WorldClick(view,765,475)
+        return false
+    Sleep(300)
+    if !WorldClick(view,370,330)
+        return false
+    Sleep(500)
+    if !WorldViewValid(view) || !MapWalk("w",500)
+        return false
+    Sleep(500)
+    if !WorldViewValid(view) || !MapWalk("a",4000)
+        return false
+    return LobbyEntryLabel(view,labels,[330,343,220,63])
 }
 
 ; Roblox keeps showing "Don't Miss Out!" event toasts in the top-right corner.
 ; Their red close button sits at x≈767 and the toast cards cover the first rows
 ; of the Select World list, so they must be cleared before picking a map.
-DismissPromoPopups(maxPopups := 4) {
-    CoordMode "Pixel", "Client"
-
-    oldMouseMode := A_CoordModeMouse
-
-    CoordMode "Mouse", "Client"
-
+DismissPromoPopups(maxPopups := 4, view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !IsObject(view)
+        return false
     loop maxPopups {
-        ; A real close button is a filled red disc about 20px across, so the
-        ; pixel 8px right and 8px down must be red as well. That rejects the
-        ; isolated red pixels inside the world-card thumbnails, which used to
-        ; make the macro select the wrong world.
-        yStart := 55
-        clicked := false
-
-        loop 12 {
-            if !PixelSearch(&px, &py, 758, yStart, 778, 320, 0xE00000, 40)
-
-                break
-
-            c := PixelGetColor(px + 8, py + 8, "RGB")
-            r := (c >> 16) & 0xFF
-            g := (c >> 8) & 0xFF
-            b := c & 0xFF
-
-            if (r > 180 && g < 60 && b < 60) {
-                FixClick(px + 8, py + 8)
-                Sleep(400)
-                clicked := true
-                break
-            }
-            yStart := py + 2
-        }
-
-        if !clicked
-            break
+        button := FindPromoPopupCloseButton(view)
+        if !IsObject(button)
+            return WorldViewValid(view)
+        if !WorldClick(view,button.x,button.y)
+            return false
+        Sleep(400)
     }
-    CoordMode "Mouse", oldMouseMode
+    return WorldViewValid(view)
+}
+
+FindPromoPopupCloseButton(view := 0) {
+    if !IsObject(view)
+        view := LobbyEntryView()
+    if !WorldViewValid(view)
+        return false
+
+    oldPixelMode := A_CoordModePixel
+    CoordMode "Pixel","Screen"
+    try {
+        yStart := view.y+Round(55*view.sy)
+        dx := Round(8*view.sx), dy := Round(8*view.sy)
+        loop 12 {
+            if !WorldViewValid(view) || !PixelSearch(&px,&py,view.x+Round(758*view.sx),yStart,
+                view.x+Round(778*view.sx),view.y+Round(320*view.sy),0xE00000,40)
+                return false
+            rgb := PixelGetColor(px+dx,py+dy)
+            if ((rgb>>16)&255)>180 && ((rgb>>8)&255)<60 && (rgb&255)<60 && WorldViewValid(view)
+                return {x:(px+dx-view.x)/view.sx,y:(py+dy-view.y)/view.sy}
+            yStart := py+Max(1,Round(2*view.sy))
+        }
+    } finally CoordMode "Pixel",oldPixelMode
+    return false
 }
 
 StartStory() {
@@ -2575,35 +3138,18 @@ StartLegend(map, actName) {
     return SelectWorldMap(map,"legend") && SelectWorldAct(actName,"legend")
 }
 
-StartRaid(map, RaidActDropdown) {
-    ClosePlayerLeaderBoard()
-    navKeys := GetNavKeys()
-    for key in navKeys {
-        SendInput("{" key "}")
-    }
-    Sleep(500)
-    downArrows := GetRaidDownArrows(map) ; Map selection down arrows
-    loop downArrows {
-        SendInput("{Down}")
-        Sleep(200)
-    }
-    SendInput("{Enter}") ; Select Raid
-    loop 4 {
-        SendInput("{Up}") ; Makes sure it selects act
-        Sleep(200)
-    }
-    SendInput("{Left}") ; Go to act selection
-    Sleep(500)
-    actArrows := GetRaidActDownArrows(RaidActDropdown) ; Act selection down arrows
-    loop actArrows {
-        SendInput("{Down}")
-        Sleep(200)
-    }
-    SendInput("{Enter}") ; Select Act
-    Sleep(300)
-    for key in navKeys {
-        SendInput("{" key "}")
-    }
+StartRaid(map, act, view?) {
+    if !IsSet(view)
+        view := LobbyEntryView()
+    if !IsObject(view) || !GetRaidDownArrows(map) || !GetRaidActDownArrows(act)
+        return false
+    ; The supported raid cards and all five act rows are visible without scrolling.
+    if !LobbyEntryLabel(view,"i)" map,[612,205,185,251],true)
+        || !LobbyEntryLabel(view,"i)" map,[219,161,366,53])
+        return false
+    number := GetRaidActDownArrows(act)
+    return LobbyEntryLabel(view,"i)^(?:(?:raid\s*)?stage|act)\s*" number "(?!\d)",[242,216,121,191],true)
+        && LobbyEntryLabel(view,"i)(?:stage|act)\s*" number "(?!\d)",[359,209,220,58])
 }
 
 ; Click the requested act tab in the map detail panel. The panel only lists the
@@ -2624,31 +3170,45 @@ PlayHere() {
     Sleep(400)
 }
 
-FindMatch() {
-    startTime := A_TickCount
-
-    Loop {
-        if (A_TickCount - startTime > 50000) {
-            ProcessLog("Matchmaking timeout (50s); returning to main loop")
-            FixClick(400, 520)
+FindMatch(selectAlreadyClicked := false) {
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    findLabel := "^find\s+match$"
+    findArea := [392,296,170,102]
+    if !selectAlreadyClicked && !LobbyEntryLabel(view,findLabel,findArea,false,1) {
+        if !LobbyEntryLabel(view,"^(select|start)$",[328,406,146,59],true)
             return false
-        }
-
-        FixClick(400, 435)  ; Play Here or Find Match
-        Sleep(300)
-        FixClick(460, 330)  ; Click Find Match
-        Sleep(300)
-
-        ; Try captcha (CaptchaDetect handles focus, ^a clear, digit entry, Submit (300, 385) and confirmation)
-        if (!CaptchaDetect(252, 292, 300, 50, 400, 335)) {
-            ProcessLog("Could not find captcha, retrying...")
-            FixClick(585, 190)  ; Click close
-            Sleep(1000)
-            continue
-        }
-        ProcessLog("FindMatch: captcha confirmed; waiting for match...")
-        return true
     }
+    if !LobbyEntryLabel(view,findLabel,findArea,true)
+        return false
+
+    deadline := A_TickCount + 50000
+    triedCaptcha := false
+    while A_TickCount < deadline && WorldViewValid(view) {
+        Sleep(350)
+        if !WorldViewValid(view)
+            return false
+        if SummerVerificationVisible() {
+            if triedCaptcha
+                continue
+            triedCaptcha := true
+            if CaptchaDetect(252, 292, 300, 50, 400, 335) {
+                ProcessLog("Find Match: verification accepted")
+                return true
+            }
+        } else if FindVoteStart(&vx,&vy) || ReadyMatchmakingQueue() {
+            ProcessLog("Find Match: queue or Vote Start confirmed")
+            return true
+        }
+    }
+    ProcessLog("Find Match: queue was not confirmed within 50s")
+    return false
+}
+
+ReadyMatchmakingQueue() {
+    text := CapysOcrRect(195,130,410,330,2)
+    return !!RegExMatch(text,"i)\b(?:finding\s+(?:a\s+)?match|matchmaking\s+in\s+progress|waiting\s+for\s+players|teleporting)\b")
 }
 
 GetLegendDownArrows(map) {
@@ -2869,17 +3429,20 @@ DetectMap(timeoutMs := 120000) {
             }
         }
 
+        if CapysResultScreenVisible()
+            return "no map found"
+
         ; Periodic lobby detection (respect initial matchmaking queue grace of 15s)
-        lobbyGrace := (IsSet(MatchMaking) && MatchMaking.Value) ? 15000 : 3000
+        lobbyGrace := (IsSet(MatchMaking) && ModeAllowsMatchmaking(mode) && MatchMaking.Value) ? 15000 : 3000
         if (A_TickCount - startTime >= lobbyGrace) {
-            if (WinActive(rblxID) && FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText)) {
+            if IsMacroLobbyVisible() {
                 ProcessLog("DetectMap: returned to lobby - returning to main loop")
                 return "lobby"
             }
         }
 
         if (A_TickCount - startTime > timeoutMs) {
-            if (FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText)) {
+            if IsMacroLobbyVisible() {
                 ProcessLog("DetectMap timeout in lobby - returning to main loop")
                 return "lobby"
             }
@@ -2893,70 +3456,52 @@ DetectMap(timeoutMs := 120000) {
 
             return "no map found"
         }
-        if !isSummer && CapysResultScreenVisible() {
-            ProcessLog("Loading interrupted by result screen; leaving cover recognition")
-            return "no map found"
+        if (mapName := ReadMatchLoadingCover()) != "" {
+            ProcessLog("Map found: " mapName)
+            return mapName
         }
-
-        try {
-            WinGetClientPos(&cx,&cy,&cw,&ch,rblxID)
-            if cw<=0 || ch<=0
-                throw Error("Empty client geometry")
-        } catch {
-            if isSummer
-                SummerMapInterrupted:=true
-            ProcessLog("Map cover client geometry unavailable; stopping recognition")
-            return "no map found"
-        }
-
-        mapPatterns := Map(
-
-            "Planet Greenie", Greenie,
-            "Ant Kingdom", Ant,
-            "Magic Town", MagicTown,
-            "Magic Hill", MagicHills,
-            "Navy Bay", Navy,
-            "Snowy Town", SnowyTown,
-            "Snowy Kingdom", SnowyKingdom,
-            "Dungeon Throne", DungeonThrone,
-            "Rain Village", RainVillage,
-            "Fiend City", Fiend,
-            "Spirit World", Spirit,
-            "Haunted Academy", Academy,
-            "Space Center", SpaceCenter,
-            "Mountain Temple", Mount,
-            "Cursed Festival", Cursed,
-            "Nightmare Train", Nightmare,
-            "Air Craft", AirCraft,
-            "Hellish City", Hellish,
-            "Shibuya District", Shibuya,
-            "Misty Village", MistyVillage
-        )
-        for mapName, pattern in mapPatterns {
-            found := false
-            if (InStr(pattern, ".png") || FileExist(pattern) || FileExist(A_ScriptDir "\" pattern)) {
-                imgPath := FileExist(pattern) ? pattern : (A_ScriptDir "\" pattern)
-                CoordMode "Pixel", "Client"
-                try {
-                    if ImageSearch(&X, &Y, 0, 0, 816, 638, "*60 " imgPath)
-                        found := true
-                }
-            } else {
-                ; Loading title band measured at client800x599; allow long full names.
-                if (ok := FindText(&X, &Y, cx+Round(cw*10/800), cy+Round(ch*58/599), cx+cw-1, cy+Round(ch*128/599), 0, 0, pattern))
-                    found := true
-            }
-
-            if (found) {
-                ProcessLog("Map found: " mapName)
-                return mapName
-            }
-        }
-        Sleep 1000
+        Sleep(350)
         Reconnect(&reconnected)
         if reconnected
             return "reconnected"
     }
+}
+
+ReadMatchLoadingCover() {
+    global Greenie, Ant, MagicTown, MagicHills, Navy, SnowyTown, SnowyKingdom, DungeonThrone, RainVillage
+    global Fiend, Spirit, Academy, SpaceCenter, Mount, Cursed, Nightmare, AirCraft, Hellish, Shibuya, MistyVillage
+    static patterns := Map("Planet Greenie",Greenie,"Ant Kingdom",Ant,"Magic Town",MagicTown,
+        "Magic Hill",MagicHills,"Navy Bay",Navy,"Snowy Town",SnowyTown,"Snowy Kingdom",SnowyKingdom,
+        "Dungeon Throne",DungeonThrone,"Rain Village",RainVillage,"Fiend City",Fiend,
+        "Spirit World",Spirit,"Haunted Academy",Academy,"Space Center",SpaceCenter,
+        "Mountain Temple",Mount,"Cursed Festival",Cursed,"Nightmare Train",Nightmare,
+        "Air Craft",AirCraft,"Hellish City",Hellish,"Shibuya District",Shibuya,"Misty Village",MistyVillage)
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return ""
+    for mapName, pattern in patterns {
+        if InStr(pattern,".png") {
+            oldMode := A_CoordModePixel
+            CoordMode "Pixel","Screen"
+            try {
+                if ImageSearch(&x,&y,view.x,view.y,view.x+view.w-1,view.y+view.h-1,"*60 " A_ScriptDir "\" pattern)
+                    return WorldViewValid(view) ? mapName : ""
+            } catch {
+                continue
+            } finally CoordMode "Pixel",oldMode
+        } else if LobbyEntryPattern(view,pattern,[10,58,799,128],&x,&y) {
+            return mapName
+        }
+    }
+    cover := CapysNormalize(CapysOcrRect(12,60,776,65,2,false))
+    if !WorldViewValid(view)
+        return ""
+    switch cover {
+        case "fabledkingdom": return "Fabled Kingdom"
+        case "puppetisland": return "Puppet Island"
+        case "virtualdungeon": return "Virtual Dungeon"
+    }
+    return ""
 }
 
 HandleMapMovement(MapName) {
@@ -3023,6 +3568,8 @@ HandleMapMovement(MapName) {
             return MoveForHauntedMansion()
         case "Alien Spaceship":
             return MoveForAlienSpaceship()
+        case "Fabled Kingdom":
+            return MoveForFabledKingdom()
         case "Ruined City":
             return MoveForRuinedCity()
         case "Adventure Town":
@@ -3032,6 +3579,19 @@ HandleMapMovement(MapName) {
     }
 
     return true
+}
+
+MoveForFabledKingdom() {
+    ; Timings from the recorded Capys Fabled Kingdom route.
+    Sleep(628)
+    for step in [["s",529,267],["a",960,228],["s",156,184],["a",1392,176],
+        ["s",3048,344],["d",280,112],["s",240,128],["d",1144,144],
+        ["s",1273,151],["d",632,896]] {
+        if !MapWalk(step[1],step[2])
+            return false
+        Sleep(step[3])
+    }
+    return MapMovementReady()
 }
 
 MoveForSacredPlanet() {
@@ -3468,14 +4028,18 @@ ResolveSelectedMap() {
     try {
         if (IsSet(mode) && (mode = "Misty Village" || mode = "Misty Infinite"))
             return "Misty Village"
-        if (IsSet(mode) && (mode = "Farm" || mode = "Infinity Castle" || mode = "Infinity Mansion" || mode = "Summer Event" || mode = "Cursed Womb" || mode = "Artifacts" || mode = "Dungeon" || mode = "Daily Infinite Quest"))
-            return mode
+        if (IsSet(mode) && mode = "Farm")
+            return WorldMapNames("main")[1]
+        if (IsSet(mode) && InStr("|Infinity Castle|Infinity Mansion|Summer Event|Cursed Womb|Artifacts|Dungeon|Daily Infinite Quest|", "|" mode "|"))
+            return ""
         if (IsSet(mode) && mode = "Story" && IsSet(StoryDropdown) && StoryDropdown.Text != "")
             return StoryDropdown.Text
         if (IsSet(mode) && mode = "Infinite" && IsSet(MapDropdown) && MapDropdown.Text != "")
             return MapDropdown.Text
-        if (IsSet(mode) && mode = "Legend" && IsSet(LegendDropDown) && LegendDropDown.Text != "")
-            return WorldCardEntry(LegendDropDown.Text,"legend")["map"]
+        if (IsSet(mode) && mode = "Legend" && IsSet(LegendDropDown) && LegendDropDown.Text != "") {
+            entry := WorldCardEntry(LegendDropDown.Text,"legend")
+            return IsObject(entry) ? entry["map"] : ""
+        }
         if (IsSet(mode) && mode = "Raid" && IsSet(RaidDropdown) && RaidDropdown.Text != "")
             return RaidDropdown.Text
         if (IsSet(mode) && mode = "Portal" && IsSet(PortalDropdown) && PortalDropdown.Text != "")
@@ -3494,19 +4058,37 @@ ResolveSelectedMap() {
 
 RestartStage(knownMap := "") {
     global mode, SummerMapName, SummerMapInterrupted
-    global MansionMapName
+    global MansionMapName, TransitionCoverMap, DailyQuestMap
     global successfulCoordinates, BossRoomCompleted, CARD_ACTION_BUSY, CARD_INPUT_BLOCKED
+    global stageStartTime, ResultCounted, lastResult
 
     ; Reset per-match global state
+    stageStartTime := A_TickCount
+    ResultCounted := false
+    lastResult := "unknown"
     successfulCoordinates := []
     ResetSmartPlacementState()
-    BossRoomCompleted := false
+    if mode != "Dungeon"
+        BossRoomCompleted := false
     ClearCardOffer()
     CARD_ACTION_BUSY := false
     CARD_INPUT_BLOCKED := false
 
+    coverMap := TransitionCoverMap
+    TransitionCoverMap := ""
+    if mode = "Infinity Mansion" {
+        MansionMapName := ""
+        knownMap := coverMap
+    } else if coverMap != "" {
+        knownMap := coverMap
+    }
     fallbackMap := (knownMap != "") ? knownMap : ResolveSelectedMap()
-    currentMap := mode="Summer Event" ? DetectMap(65000) : (knownMap != "" ? knownMap : DetectMap())
+    if mode = "Summer Event" {
+        SummerMapInterrupted := false
+        currentMap := coverMap != "" ? coverMap : DetectMap(65000)
+    } else {
+        currentMap := knownMap != "" ? knownMap : DetectMap()
+    }
     if (currentMap = "lobby" || currentMap = "reconnected")
         return currentMap
 
@@ -3522,13 +4104,22 @@ RestartStage(knownMap := "") {
     if mode = "Infinity Mansion"
         MansionMapName := currentMap="no map found" || currentMap="không tìm thấy map" ? "" : currentMap
     if mode="Summer Event" && SummerMapInterrupted
-        return false
+        return CapysResultScreenVisible() ? HandleStageResult() : false
 
     status := CheckLoaded()
     if (status = "lobby" || status = "reconnected")
         return status
     if status = "result"
-        return MonitorEndScreen()
+        return HandleStageResult()
+    if status != "loaded"
+        return false
+    if mode = "Farm" {
+        started := StartedGame()
+        if started != true
+            return started
+        ProcessLog("Farm: waiting for defeat without placing units")
+        return MonitorStage()
+    }
 
     if mode="Summer Event" {
         coverMap:=ParseSummerMapName(currentMap)
@@ -3571,6 +4162,8 @@ RestartStage(knownMap := "") {
                 return started
             if !started
                 return false
+            if mode = "Daily Infinite Quest" && DailyQuestMap = ""
+                DailyQuestMap := ReadInfiniteMatchMap()
             PlacementCamera()
         } else {
             if !HandleMapMovement(currentMap) || !MapMovementReady()
@@ -3603,8 +4196,8 @@ JoinUrl(link) {
 
 IsDisconnected() {
     global rblxID, Disconnect
-    ; 1. FindText Disconnect template
-    if FindText(&X, &Y, 330, 218, 474, 247, 0, 0, Disconnect)
+    view := LobbyEntryView()
+    if IsObject(view) && LobbyEntryPattern(view,Disconnect,[330,218,474,247],&x,&y)
         return true
 
     ; 2. OCR check dialog header (245, 170, 310, 65)
@@ -3631,11 +4224,11 @@ IsDisconnected() {
 }
 
 RelaunchRobloxToLobby() {
-    global rblxID, AreaText
+    global rblxID
     EndCardMatch("relaunch-lobby")
     psLink := FileExist("Settings\PrivateServer.txt") ? FileRead("Settings\PrivateServer.txt", "UTF-8") : ""
     targetUrl := JoinUrl(psLink)
-    ProcessLog("Launching Roblox to lobby URL: " targetUrl)
+    ProcessLog("Launching Roblox to lobby")
 
     try ProcessClose("RobloxPlayerBeta.exe")
     closeDeadline := A_TickCount + 5000
@@ -3643,9 +4236,17 @@ RelaunchRobloxToLobby() {
         try ProcessClose("RobloxPlayerBeta.exe")
         Sleep(300)
     }
+    if ProcessExist("RobloxPlayerBeta.exe") {
+        ProcessLog("Recovery: previous Roblox process did not exit")
+        return false
+    }
     Sleep(1500)
 
-    Run(targetUrl)
+    try Run(targetUrl)
+    catch {
+        ProcessLog("Recovery: Windows could not launch Roblox")
+        return false
+    }
 
     waitStart := A_TickCount
     newRblxHwnd := 0
@@ -3680,13 +4281,8 @@ RelaunchRobloxToLobby() {
             ProcessLog("Encountered connection error while loading lobby")
             return false
         }
-        if WinActive(rblxID) && FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText) {
+        if IsMacroLobbyVisible() {
             ProcessLog("Successfully loaded into lobby; ready for next run")
-            Sleep(2000)
-            return true
-        }
-        if RegExMatch(SummerReadUI(), "i)\barea\b|\bsummon\b|\bevolve\b|\bquests\b") {
-            ProcessLog("Successfully loaded into lobby (OCR confirmed); ready for next run")
             Sleep(2000)
             return true
         }
@@ -3721,8 +4317,8 @@ RecoverToLobby() {
     return false
 }
 
-PlaceUnit(x, y, slot := 1, &abilityDone := false) {
-    global rblxID, mode, AutoAbilityBox
+PlaceUnit(x, y, slot := 1, &abilityDone := false, greenOnly := false) {
+    global rblxID, mode, UpgradePauseEpoch
     abilityDone := false
     static nextServiceAt := 0
 
@@ -3736,19 +4332,34 @@ PlaceUnit(x, y, slot := 1, &abilityDone := false) {
         return "interrupted"
     }
 
+    view := {window:WinActive(rblxID), geometry:SmartPlacementGeometry(), pauseEpoch:UpgradePauseEpoch}
+    if !view.window || !view.geometry || !UpgradeViewStable(view) || !UnitActionAllowed()
+        return "interrupted"
     oldMouseMode := A_CoordModeMouse
     CoordMode "Mouse", "Client"
     try {
-        if IsUnitPanelOpenFast() {
-            SendEvent("q")
-            Sleep(35)
-            CloseUnitPanel()
+        SendEvent("q")
+        if (IsUnitPanelOpenFast() || FindSmartPlacementPanel()) {
+            if !CloseUpgradeSelection(view) || !UpgradeViewStable(view)
+                return "interrupted"
         }
-        SendEvent("{" slot "}")
-        Sleep(70)
+        if greenOnly && !SmartCapturePreviewReference(x, y, slot, true)
+            return "interrupted"
+        if !SmartPressSlotKey(slot)
+            return "interrupted"
+        if greenOnly {
+            FixMove(x, y)
+            if SmartWaitPreviewReady(x, y, 1200, &details, true) != "ready" {
+                if UpgradeViewStable(view) && UnitActionAllowed()
+                    SendEvent("q")
+                return false
+            }
+        }
+        if !UpgradeViewStable(view) || !UnitActionAllowed(true)
+            return "interrupted"
         FixClick(x, y)
-        confirmed := UnitPlaced(&abilityDone)
-        if (confirmed = false)
+        confirmed := UnitPlaced(&abilityDone, view)
+        if (confirmed = false && UpgradeViewStable(view) && UnitActionAllowed())
             SendEvent("q")
         return confirmed
     } finally {
@@ -3761,29 +4372,25 @@ MaxUpgrade(&current := -1) {
     current := -1
     if !CapysGetClientBox(&cx, &cy, &cw, &ch, &window) || !WinActive("ahk_id " window)
         return false
-    if !FindUnitPanel()
+    if IsUnitPanelOpenFast(&kind)
+        compact := (kind = "compact")
+    else if FindUnitPanel()
+        compact := UnitPanelUsesNewUI
+    else
         return false
 
-    compact := UnitPanelUsesNewUI
-    level := -1
-    view := {x:cx, y:cy, sx:cw/800, sy:ch/599}
-    if compact {
-        maxed := FindUnitMaxImage(view, "MaxTag.png", [142, 231, 260, 259], 37, 16)
-            || FindUnitMaxImage(view, "MaxButton.png", [152, 363, 270, 398], 37, 21)
-    } else {
-        maxed := FindUnitMaxImage(view, "MaxButtonLegacy.png", [185, 340, 315, 395], 60, 35)
-    }
-
-    if !maxed {
-        level := ReadUnitUpgradeLevel(true, compact)
-        maxed := level = 999
-        ; The MAX label and action button are independent of the level OCR.
-        if (!maxed && compact) {
-            label := CapysOcrRect(145, 270, 125, 65, 3)
-            maxed := StrLower(RegExReplace(label, "[^A-Za-z]", "")) = "maxupgrade"
+    level := ReadUnitUpgradeLevel(true, compact)
+    maxed := (level = 999)
+    if (!maxed && level < 0) {
+        view := {x:cx, y:cy, sx:cw/800, sy:ch/599}
+        if compact {
+            maxed := FindUnitMaxImage(view, "MaxTag.png", [142, 231, 260, 259], 37, 16)
+                || FindUnitMaxImage(view, "MaxButton.png", [152, 363, 270, 398], 37, 21)
+                || StrLower(RegExReplace(CapysOcrRect(145, 270, 125, 65, 3), "[^A-Za-z]", "")) = "maxupgrade"
                 || RegExMatch(CapysOcrRect(160, 368, 100, 24, 4), "i)^\s*max\s*$")
-        } else if !maxed {
-            maxed := RegExMatch(CapysOcrRect(210, 350, 80, 35, 3), "i)^\s*max\s*$")
+        } else {
+            maxed := FindUnitMaxImage(view, "MaxButtonLegacy.png", [185, 340, 315, 395], 60, 35)
+                || RegExMatch(CapysOcrRect(210, 350, 80, 35, 3), "i)^\s*max\s*$")
         }
     }
 
@@ -3816,51 +4423,70 @@ FindUnitMaxImage(view, filename, region, width, height) {
     }
 }
 
-UnitPlaced(&abilityDone := false) {
+UnitPlaced(&abilityDone := false, view := 0) {
     global rblxID, mode, AutoAbilityBox
     abilityDone := false
-    interrupted := false
-    Sleep(100)
-
-    loop 4 {
-        if !WinActive(rblxID)
-            return "uncertain"
-
-        if IsUnitPanelOpenFast(&pKind, &kx, &ky) {
-            if (IsSet(mode) && InStr(mode, "Misty") && DismissDefensePanel()) {
+    confirmed := WaitForPlacedUnitPanel(view,&panelKind)
+    if confirmed = "uncertain"
+        return confirmed
+    if confirmed {
+        if IsSet(mode) && InStr(mode,"Misty") && DismissDefensePanel() {
+            if WinActive(rblxID)
                 SendEvent("q")
-                return false
-            }
-            ProcessLog("Unit placement confirmed (" pKind " panel)")
-            if (!IsSet(mode) || mode != "Summer Event" || !ServiceSummerCards()) {
-                if AutoAbilityBox.Value
-                    CheckAbility()
-                abilityDone := true
-            }
-            CloseUnitPanel()
-            return true
+            return false
         }
-        Sleep(80)
-    }
-
-    if CheckPlacementLimit() {
-        ProcessLog("Placement limit reached (unique/max limit)")
-        SendEvent("q")
-        return "limit"
-    }
-    if FindSmartPlacementPanel() {
-        ProcessLog("Unit placement confirmed (smart panel)")
-        if AutoAbilityBox.Value
-            CheckAbility()
-        abilityDone := true
-        CloseUnitPanel()
+        ProcessLog("Unit placement confirmed (" panelKind " panel)")
+        if IsSet(mode) && mode = "Summer Event" && ServiceSummerCards()
+            return true
+        if (!IsObject(view) || UpgradeViewStable(view)) && UnitActionAllowed() {
+            if AutoAbilityBox.Value
+                CheckAbility()
+            abilityDone := true
+            if !IsObject(view) || UpgradeViewStable(view)
+                CloseUnitPanel()
+        }
         return true
     }
-    if (CapysResultScreenVisible())
+
+    if !UnitActionAllowed(true)
+        return CapysResultScreenVisible(1000) ? "ended" : "uncertain"
+    if IsObject(view) && !UpgradeViewStable(view)
+        return "uncertain"
+    if CheckPlacementLimit() {
+        ProcessLog("Placement limit reached (unique/max limit)")
+        if !IsObject(view) || UpgradeViewStable(view)
+            SendEvent("q")
+        return "limit"
+    }
+    if CapysResultScreenVisible(1000)
         return "ended"
-    if (IsSet(mode) && mode = "Summer Event" && ServiceSummerCards())
-        interrupted := true
-    return interrupted || !UnitActionAllowed() ? "uncertain" : false
+    if (IsSet(mode) && mode = "Summer Event" && ServiceSummerCards()) || !UnitActionAllowed()
+        return "uncertain"
+    return false
+}
+
+WaitForPlacedUnitPanel(view, &panelKind) {
+    global rblxID
+    panelKind := ""
+    previous := ""
+    Sleep(100)
+    loop 4 {
+        if !WinActive(rblxID) || (IsObject(view) && !UpgradeViewStable(view))
+            return "uncertain"
+        panel := IsUnitPanelOpenFast(&kind)
+        if !panel
+            kind := FindSmartPlacementPanel() ? "smart" : ""
+        if !WinActive(rblxID) || (IsObject(view) && !UpgradeViewStable(view))
+            return "uncertain"
+        if kind != "" && kind = previous {
+            panelKind := kind
+            return true
+        }
+        previous := kind
+        if A_Index < 4
+            Sleep(80)
+    }
+    return false
 }
 
 RecheckSummerPlacement(x, y, originalWindow) {
@@ -4052,10 +4678,11 @@ CloseUnitPanel(force := false, fastPanel := false) {
         return false
 
     isOpen := IsUnitPanelOpenFast(&kind, &kx, &ky)
-    if (!isOpen) {
+    smartOpen := !isOpen && FindSmartPlacementPanel()
+    if (!isOpen && !smartOpen) {
         if (force && IsSet(mode) && InStr(mode, "Misty") && IsDefensePanelOpen()) {
             DismissDefensePanel()
-            return !IsUnitPanelOpenFast()
+            return !IsUnitPanelOpenFast() && !FindSmartPlacementPanel()
         }
         if !force
             return true
@@ -4065,7 +4692,12 @@ CloseUnitPanel(force := false, fastPanel := false) {
     CoordMode "Mouse", "Screen"
     try {
         loop 3 {
-            if !IsUnitPanelOpenFast(&kind, &kx, &ky) {
+            if IsUnitPanelOpenFast(&kind, &kx, &ky) {
+                ; Use detected panel close button coordinates
+            } else if FindSmartPlacementPanel() {
+                kx := (A_Index = 1) ? 277 : 638
+                ky := (A_Index = 1) ? 228 : 549
+            } else {
                 if (!force || A_Index > 1)
                     return true
                 kx := 638, ky := 549
@@ -4075,13 +4707,13 @@ CloseUnitPanel(force := false, fastPanel := false) {
             sx := cw / 800, sy := ch / 599
             FixClick(cx + Round(kx * sx), cy + Round(ky * sy))
             Sleep(60)
-            if !IsUnitPanelOpenFast()
+            if !IsUnitPanelOpenFast() && !FindSmartPlacementPanel()
                 return true
         }
     } finally {
         CoordMode "Mouse", oldMouseMode
     }
-    return !IsUnitPanelOpenFast() && WinActive("ahk_id " targetWin)
+    return !IsUnitPanelOpenFast() && !FindSmartPlacementPanel() && WinActive("ahk_id " targetWin)
 }
 
 CheckAbility() {
@@ -4196,7 +4828,7 @@ CapysGetClientBox(&cx := 0, &cy := 0, &cw := 0, &ch := 0, &targetWin := 0) {
     return false
 }
 
-CapysOcrRect(rx, ry, rw, rh, scale := 2, tryContrast := true) {
+CapysOcrRect(rx, ry, rw, rh, scale := 2, tryContrast := true, whiteOnly := false, goldOnly := false) {
     if !CapysGetClientBox(&cx, &cy, &cw, &ch)
         return ""
     sx := cw / 800, sy := ch / 599
@@ -4205,9 +4837,10 @@ CapysOcrRect(rx, ry, rw, rh, scale := 2, tryContrast := true) {
     sxW := Max(8, Round(rw * sx))
     sxH := Max(8, Round(rh * sy))
     text := ""
-    try text := Trim(OCR.FromRect(sxX, sxY, sxW, sxH, "en-US", scale).Text)
+    if (!whiteOnly && !goldOnly)
+        try text := Trim(OCR.FromRect(sxX, sxY, sxW, sxH, "en-US", scale).Text)
     if (text = "" && tryContrast) {
-        try text := Trim(ReadHighContrastText(sxX, sxY, sxW, sxH, Min(Max(scale, 2), 4), 0, false))
+        try text := Trim(ReadHighContrastText(sxX, sxY, sxW, sxH, Min(Max(scale, 2), 4), 0, false, whiteOnly, goldOnly))
     }
     return text
 }
@@ -4217,7 +4850,10 @@ CapysNormalize(text) {
 }
 
 CapysReadVote(&x, &y, &boardVisible := false) {
+    global mode
     boardVisible := false
+    if (mode = "Summer Event" || mode = "Infinity Mansion")
+        return false
     if !CapysGetClientBox(&cx, &cy, &cw, &ch)
         return false
     text := CapysOcrRect(290, 25, 230, 125, 2, true)
@@ -4236,15 +4872,20 @@ CapysReadVote(&x, &y, &boardVisible := false) {
 }
 
 CapysReadWave() {
-    text := CapysOcrRect(140, 60, 220, 65, 3, true)
-    if RegExMatch(text, "i)\bWave\s*:?\s*([1-9]\d{0,3})\b", &m)
-        return Integer(m[1])
+    for crop in [[150,55,110,25],[140,60,220,65]] {
+        text := CapysOcrRect(crop[1],crop[2],crop[3],crop[4],3,true)
+        if RegExMatch(text,"i)\bWave\s*:?\s*([1-9]\d{0,3})\b",&m)
+            return Integer(m[1])
+    }
     return -1
 }
 
 CapysReadResult(&nextVisible := false) {
     text := CapysOcrRect(125, 150, 390, 275, 2, true)
     nextVisible := !!RegExMatch(text, "im)^\h*next\h*$")
+    if !nextVisible && (RegExMatch(CapysNormalize(text),"victory|defeat|gameover|\bnext")
+        || InStr(CapysNormalize(CapysOcrRect(520,105,250,90,2)),"xpprogress"))
+        nextVisible := CapysNormalize(CapysOcrRect(267,370,114,62,3)) = "next"
     if (text = "")
         return ""
     norm := CapysNormalize(text)
@@ -4256,64 +4897,187 @@ CapysReadResult(&nextVisible := false) {
 }
 
 CapysReadReward() {
-    for crop in [[200, 420, 400, 100, 2], [200, 445, 400, 45, 3]] {
-        norm := CapysNormalize(CapysOcrRect(crop[1], crop[2], crop[3], crop[4], crop[5], true))
+    for crop in [[200, 420, 400, 100, 2, false], [200, 445, 400, 45, 3, true]] {
+        norm := CapysNormalize(CapysOcrRect(crop[1], crop[2], crop[3], crop[4], crop[5], crop[6]))
         if RegExMatch(norm, "(?:c[l1i][i1l]ck|tap)any(?:w|vv)here(?:t[o0])?c[o0]nt[i1l]nue")
             return true
     }
     return false
 }
 
+CapysButtonPillKind(bx) {
+    if !CapysGetClientBox(&cx, &cy, &cw, &ch)
+        return ""
+    sx := cw / 800, sy := ch / 599
+    hdc := DllCall("user32\GetDC", "Ptr", 0, "Ptr")
+    if !hdc
+        return ""
+    greenHits := 0, goldHits := 0
+    try {
+        for py in [133, 137] {
+            syY := cy + Round(py * sy)
+            for dx in [-45, -24, 0, 24, 45] {
+                c := DllCall("gdi32\GetPixel", "Ptr", hdc, "Int", cx + Round((bx + dx) * sx), "Int", syY, "UInt")
+                if (c = 0xFFFFFFFF)
+                    continue
+                r := c & 255, g := (c >> 8) & 255, b := (c >> 16) & 255
+                if (g >= 135 && r <= 90 && b <= 65 && g - b >= 65)
+                    greenHits++
+                else if (r >= 185 && g >= 130 && b <= 65 && r - b >= 120)
+                    goldHits++
+            }
+        }
+    } finally {
+        DllCall("user32\ReleaseDC", "Ptr", 0, "Ptr", hdc)
+    }
+    if greenHits >= 6
+        return "green"
+    if goldHits >= 6
+        return "gold"
+    return ""
+}
+
+CapysChoiceNormHas(norms, pattern) {
+    for norm in norms {
+        if (norm != "" && RegExMatch(norm, pattern))
+            return true
+    }
+    return false
+}
+
 CapysReadChoice(confirmButtons := true) {
-    norm := CapysNormalize(CapysOcrRect(130, 80, 545, 110, 2, true))
-    if (norm = "")
+    norms := []
+    raw2 := CapysNormalize(CapysOcrRect(130, 80, 545, 110, 2, false))
+    if (raw2 != "")
+        norms.Push(raw2)
+
+    choicePat := "returnt[o0]l[o0]bb|picknextportal|opendungeon|nextf[l1i]oor|nextroom|nextlevel|replay|retry"
+    if !CapysChoiceNormHas(norms, choicePat) {
+        raw3 := CapysNormalize(CapysOcrRect(130, 90, 545, 95, 3, false))
+        if (raw3 != "")
+            norms.Push(raw3)
+        if !CapysChoiceNormHas(norms, "returnt[o0]l[o0]bb") {
+            white3 := CapysNormalize(CapysOcrRect(130, 90, 545, 95, 3, true, true))
+            if (white3 != "")
+                norms.Push(white3)
+        }
+    }
+
+    hasLobby := CapysChoiceNormHas(norms, "returnt[o0]l[o0]bb")
+    hasWaiting := CapysChoiceNormHas(norms, "waitingfor(?:players|owner)")
+    hasAction := CapysChoiceNormHas(norms, "picknextportal|opendungeon|nextf[l1i]oor|nextroom|nextlevel|replay|retry")
+
+    pillKinds := Map()
+    hasAnyPill := false
+    if (confirmButtons || !hasLobby || !hasAction) {
+        for bx in [224, 312, 400, 488, 576] {
+            pk := CapysButtonPillKind(bx)
+            pillKinds[bx] := pk
+            if (pk != "")
+                hasAnyPill := true
+        }
+    }
+
+    if (!norms.Length && !hasAnyPill)
         return 0
-    res := Map("kind", "none", "hasNextLevel", 0, "hasNextRoom", 0, "hasNextFloor", 0, "hasNextPortal", 0, "hasRetry", 0, "replayX", 0, "nextLevelX", 0, "lobbyX", 0, "ownerWait", 0)
-    if InStr(norm, "picknextportal") && InStr(norm, "returntolobby") {
-        res["kind"] := "choice", res["hasNextPortal"] := 1, res["replayX"] := 488
-    } else if RegExMatch(norm, "nextf[l1i]oor") && InStr(norm, "returntolobby") {
+
+    btnLobbyX := 0, btnReplayX := 0, btnNextX := 0
+    if (confirmButtons || hasLobby || hasWaiting || hasAction || hasAnyPill) {
+        for bx in [224, 312, 400, 488, 576] {
+            pk := pillKinds.Get(bx, "")
+            if (!confirmButtons && !hasLobby && !hasWaiting && !hasAction && pk = "")
+                continue
+            btnText := CapysNormalize(CapysOcrRect(bx - 77, 96, 154, 52, 3, false))
+            if (btnText = "" || (pk = "green" && !RegExMatch(btnText, "returnt[o0]l[o0]bb"))) {
+                btnWhite := CapysNormalize(CapysOcrRect(bx - 77, 96, 154, 52, 3, true, true))
+                if (btnWhite != "")
+                    btnText := btnText != "" ? btnText " " btnWhite : btnWhite
+            }
+            if (btnText = "")
+                continue
+            norms.Push(btnText)
+            if RegExMatch(btnText, "returnt[o0]l[o0]bb") || (pk = "green" && InStr(btnText, "return"))
+                btnLobbyX := bx
+            else if RegExMatch(btnText, "replay|retry")
+                btnReplayX := bx
+            else if RegExMatch(btnText, "nextlevel|nextf[l1i]oor|nextroom|picknextportal|opendungeon")
+                btnNextX := bx
+        }
+    }
+
+    hasLobby := CapysChoiceNormHas(norms, "returnt[o0]l[o0]bb") || btnLobbyX > 0
+    hasNextPortal := CapysChoiceNormHas(norms, "picknextportal")
+    hasOpenDungeon := CapysChoiceNormHas(norms, "opendungeon")
+    hasNextFloor := CapysChoiceNormHas(norms, "nextf[l1i]oor")
+    hasNextRoom := CapysChoiceNormHas(norms, "nextroom")
+    hasNextLevel := CapysChoiceNormHas(norms, "nextlevel")
+    hasReplay := CapysChoiceNormHas(norms, "replay")
+    hasRetry := CapysChoiceNormHas(norms, "retry")
+    hasWaitPlayers := CapysChoiceNormHas(norms, "waitingforplayers")
+    choiceSignal := hasLobby || (hasWaitPlayers && (hasReplay || hasRetry || hasNextLevel || hasNextFloor || hasNextRoom || hasNextPortal || hasOpenDungeon)) || (hasAnyPill && (hasReplay || hasRetry || hasNextLevel || hasNextFloor || hasNextRoom || hasNextPortal || hasOpenDungeon))
+
+    if !choiceSignal
+        return 0
+
+    res := Map("kind", "none", "hasNextLevel", 0, "hasNextRoom", 0, "hasNextFloor", 0, "hasNextPortal", 0, "hasOpenDungeon", 0, "hasRetry", 0, "replayX", 0, "nextLevelX", 0, "lobbyX", 0, "ownerWait", 0)
+    if hasNextPortal {
+        res["kind"] := "choice", res["hasNextPortal"] := 1, res["replayX"] := 488, res["lobbyX"] := 312
+    } else if hasOpenDungeon {
+        res["kind"] := "choice", res["hasOpenDungeon"] := 1, res["lobbyX"] := 312
+    } else if hasNextFloor {
         res["kind"] := "choice", res["hasNextFloor"] := 1, res["nextLevelX"] := 488, res["lobbyX"] := 312
-    } else if InStr(norm, "nextroom") && InStr(norm, "returntolobby") {
+    } else if hasNextRoom {
         res["kind"] := "choice", res["hasNextRoom"] := 1, res["nextLevelX"] := 488, res["lobbyX"] := 312
-    } else if InStr(norm, "replay") && (InStr(norm, "nextlevel") || InStr(norm, "returntolobby")) {
+    } else if hasReplay {
         res["kind"] := "choice"
-        res["hasNextLevel"] := InStr(norm, "nextlevel") ? 1 : 0
+        res["hasNextLevel"] := hasNextLevel ? 1 : 0
         res["replayX"] := res["hasNextLevel"] ? 400 : 488
         res["nextLevelX"] := res["hasNextLevel"] ? 576 : 0
         res["lobbyX"] := res["hasNextLevel"] ? 224 : 312
-    } else if InStr(norm, "retry") && InStr(norm, "returntolobby") {
+    } else if hasRetry {
         res["kind"] := "choice", res["hasRetry"] := 1, res["replayX"] := 488, res["lobbyX"] := 312
-    } else if InStr(norm, "returntolobby") {
+    } else if hasLobby {
         res["kind"] := "choice", res["lobbyX"] := 400
     } else {
         return 0
     }
-    res["ownerWait"] := InStr(norm, "waitingforowner") ? 1 : 0
-    if !confirmButtons
-        return res
 
-    ; Xac minh toa do chinh xac cac nut tai hang y=99..143 (Capys ConfirmReplayButton)
-    for bx in [224, 312, 400, 488, 576] {
-        btnText := CapysNormalize(CapysOcrRect(bx - 77, 99, 154, 44, 3, true))
-        if (btnText = "")
-            continue
-        if InStr(btnText, "returntolobby") || InStr(btnText, "return")
-            res["lobbyX"] := bx
-        else if RegExMatch(btnText, "replay|retry")
-            res["replayX"] := bx
-        else if RegExMatch(btnText, "nextlevel|nextf[l1i]oor|nextroom|picknextportal")
-            res["nextLevelX"] := bx
-    }
+    if hasNextLevel
+        res["hasNextLevel"] := 1
+    if btnLobbyX > 0
+        res["lobbyX"] := btnLobbyX
+    if btnReplayX > 0
+        res["replayX"] := btnReplayX
+    if btnNextX > 0
+        res["nextLevelX"] := btnNextX
+    res["ownerWait"] := CapysChoiceNormHas(norms, "waitingforowner") ? 1 : 0
     return res
 }
 
-CapysResultScreenVisible() {
-    if CapysReadResult(&nextVisible) != ""
-        return true
-    ; A covered result title can still leave both summary controls visible.
-    if nextVisible && InStr(CapysNormalize(CapysOcrRect(520, 105, 250, 90, 2, true)), "xpprogress")
-        return true
-    return CapysReadReward() || IsObject(CapysReadChoice(false))
+CapysResultScreenVisible(cacheMs := 0) {
+    global mode
+    static lastAt := 0, lastWin := 0
+    hwnd := RefreshClientTarget()
+    if (cacheMs > 0 && hwnd && hwnd = lastWin && (A_TickCount - lastAt < cacheMs))
+        return false
+
+    res := false
+    if mode = "Dungeon" && IsObject(view := LobbyEntryView()) && ReadDungeonDeath(view)
+        res := true
+    else if CapysReadResult(&nextVisible) != ""
+        res := true
+    else if nextVisible && InStr(CapysNormalize(CapysOcrRect(520, 105, 250, 90, 2, true)), "xpprogress")
+        res := true
+    else
+        res := CapysReadReward() || IsObject(CapysReadChoice(false))
+
+    if !res {
+        lastAt := A_TickCount
+        lastWin := hwnd
+    } else {
+        lastAt := 0
+    }
+    return res
 }
 
 ParseUnitUpgradeLevel(text) {
@@ -4396,12 +5160,15 @@ ReadUnitUpgradeLevel(panelKnown := false, compact := true) {
     return -1
 }
 
-PressUnitUpgrade() {
-    if !UnitActionAllowed(true)
+PressUnitUpgrade(view := 0) {
+    global rblxID
+    if !UnitActionAllowed(true) || !WinActive(rblxID) || (IsObject(view) && !UpgradeViewStable(view))
         return false
-    SendEvent("{r down}")
-    Sleep(80)
-    SendEvent("{r up}")
+    ; Let SendEvent release the key even if the macro is paused after sending it.
+    oldDelay := A_KeyDelay, oldDuration := A_KeyDuration
+    SetKeyDelay(oldDelay, 80)
+    try SendEvent("{r}")
+    finally SetKeyDelay(oldDelay, oldDuration)
     return true
 }
 
@@ -4493,12 +5260,24 @@ UpgradeUnit(x, y, slot := 0, &panelClear := false) {
     return panelClear ? result : false
 }
 
+IsMacroLobbyVisible() {
+    global AreaText
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    if WorldImageFind("World_Areas.png",view,[738,448,798,510],44,16,&x,&y,90)
+        || LobbyEntryPattern(view, AreaText, [738, 453, 799, 538], &x, &y)
+        return true
+    text := CapysOcrRect(738, 451, 62, 88, 3)
+    return WorldViewValid(view) && RegExMatch(text,"im)^\h*areas\h*$")
+}
+
 CheckLobby() {
     waitStart := A_TickCount
     loop {
         Sleep 1000
         RefreshClientTarget()
-        if (FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText)) {
+        if IsMacroLobbyVisible() {
             break
         }
         Reconnect(&reconnected)
@@ -4530,7 +5309,7 @@ FindVoteStart(&x, &y, &boardVisible := false) {
             boardVisible := true
             return true
         }
-        return CapysReadVote(&x, &y, &boardVisible)
+        return false
     }
     if (mode = "Infinity Mansion") {
         sx := cw / 800, sy := ch / 599
@@ -4541,7 +5320,7 @@ FindVoteStart(&x, &y, &boardVisible := false) {
             boardVisible := true
             return true
         }
-        return CapysReadVote(&x, &y, &boardVisible)
+        return false
     }
     if CapysReadVote(&x, &y, &boardVisible)
         return true
@@ -4581,7 +5360,7 @@ RegularMatchHudVisible() {
     if mode="Summer Event" || !CapysGetClientBox(&cx, &cy, &cw, &ch, &targetWin)
         return false
     try {
-        if CapysReadWave() >= 1 && !CapysResultScreenVisible()
+        if CapysReadWave() >= 1 && !CapysResultScreenVisible(1000)
             return true
         if !WinActive("ahk_id " targetWin)
             return false
@@ -4599,7 +5378,7 @@ RegularMatchHudVisible() {
         if !RegExMatch(cash,"i)^\s*\d[\d,.\s]*[kmb]?\s*[¥y%]?\s*$")
             return false
         WinGetClientPos(&nx,&ny,&nw,&nh,targetWin)
-        return nx=cx && ny=cy && nw=cw && nh=ch && !CapysResultScreenVisible()
+        return nx=cx && ny=cy && nw=cw && nh=ch && !CapysResultScreenVisible(1000)
     }
     return false
 }
@@ -4618,6 +5397,9 @@ CheckLoaded() {
         CapysGetClientBox(&cx, &cy, &cw, &ch, &targetWin)
 
         ; 1. Phát hiện Vote Start chuẩn Capys OCR (hoạt động cả khi cửa sổ macro đang focus)
+        if CapysResultScreenVisible()
+            return "result"
+
         if FindVoteStart(&X, &Y) {
             if targetWin && !WinActive("ahk_id " targetWin)
                 try WinActivate("ahk_id " targetWin)
@@ -4625,14 +5407,11 @@ CheckLoaded() {
             return "loaded"
         }
 
-        if CapysResultScreenVisible()
-            return "result"
-
         if SummerMatchStarted() {
             ProcessLog("Summer Event: active match HUD detected; match loaded")
             return "loaded"
         }
-        if !summer && (CapysReadWave() >= 1 || RegularMatchHudVisible()) {
+        if !summer && RegularMatchHudVisible() {
             if targetWin && !WinActive("ahk_id " targetWin)
                 try WinActivate("ahk_id " targetWin)
             ProcessLog("Match loaded: Wave / HUD confirmed")
@@ -4640,9 +5419,9 @@ CheckLoaded() {
         }
 
         ; 2. Kiểm tra bị đá về sảnh (chờ tối thiểu 15s khi MatchMaking bật để tránh nhận nhầm lúc đang đếm Teleport)
-        lobbyGrace := (IsSet(MatchMaking) && MatchMaking.Value) ? 15000 : 3000
+        lobbyGrace := (IsSet(MatchMaking) && ModeAllowsMatchmaking(mode) && MatchMaking.Value) ? 15000 : 3000
         if (A_TickCount - loadStart >= lobbyGrace) {
-            if targetWin && WinActive("ahk_id " targetWin) && FindText(&X, &Y, 746, 514, 789, 530, 0, 0, AreaText) {
+            if IsMacroLobbyVisible() {
                 ProcessLog("Lobby detected (match aborted or failed to teleport) - returning to main loop")
                 Sleep(1000)
                 return "lobby"
@@ -4651,8 +5430,7 @@ CheckLoaded() {
 
         if (A_TickCount - loadStart >= 120000) {
             ProcessLog("CheckLoaded timed out after 120s; recovering to lobby...")
-            RecoverToLobby()
-            return "lobby"
+            return RecoverToLobby()
         }
 
         if (A_TickCount >= deadline) {
@@ -4662,12 +5440,12 @@ CheckLoaded() {
 
         Reconnect(&reconnected)
         if reconnected
-            return "lobby"
+            return "reconnected"
     }
 }
 
 StartedGame() {
-    global mode, MatchMaking, SummerMinimumPlayers, stageStartTime
+    global mode, MatchMaking, SummerMinimumPlayers, stageStartTime, ResultCounted, lastResult
     summer := mode = "Summer Event"
     lowCount := 0, lowReads := 0
     unknownLogged := false, waitingLogged := false
@@ -4696,6 +5474,10 @@ StartedGame() {
 
         if !CapysGetClientBox(&cx, &cy, &cw, &ch, &targetWin)
             continue
+        if (summer || mode = "Infinity Mansion") && !WinActive("ahk_id " targetWin) {
+            try WinActivate("ahk_id " targetWin)
+            continue
+        }
         if !FindVoteStart(&x, &y, &boardVisible) {
             if !boardVisible && WinActive("ahk_id " targetWin)
                 && (summer ? SummerMatchStarted() : (CapysReadWave() >= 1 || RegularMatchHudVisible())) {
@@ -4740,8 +5522,10 @@ StartedGame() {
         break
     }
 
-    ProcessLog("Match ready; proceeding to placement")
+    ProcessLog("Match ready")
     stageStartTime := A_TickCount
+    ResultCounted := false
+    lastResult := "unknown"
     return true
 }
 
@@ -4750,7 +5534,10 @@ ClickVoteStart(targetWin, cx, cy, cw, ch, x, y) {
     if !CapysGetClientBox(&nx, &ny, &nw, &nh, &window) || window != targetWin
         || nx != cx || ny != cy || nw != cw || nh != ch || !WinActive("ahk_id " targetWin)
         return false
-    if (mode != "Summer Event" && mode != "Infinity Mansion") {
+    if (mode = "Summer Event" || mode = "Infinity Mansion") {
+        if (x <= 0 || y <= 0)
+            return false
+    } else {
         x := cx + Round(353 * cw / 800)
         y := cy + Round(104 * ch / 599)
     }
@@ -4941,7 +5728,7 @@ ValidateMode() {
     }
 
     if (ModeDropdown.Text = "") {
-        ProcessLog("Choose mode, my Nigga")
+        ProcessLog("Select a mode before pressing F2")
         return false
     }
 
@@ -4963,24 +5750,31 @@ CheckEndAndRoute(&handled := false) {
         handled := true
         EndCardMatch("result-route")
         ProcessLog("Found end screen")
-        if (mode = "Dungeon" && !MatchMaking.Value) {
-            return MonitorDungeonEnd()
-        } else {
-            return MonitorEndScreen()
-        }
+        return HandleStageResult()
     }
 }
 
 ClickUntilGone(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0, offsetY := 0, textToFind2 := "") {
-    while (ok := FindText(&X, &Y, searchX1, searchY1, searchX2, searchY2, 0.15, 0.15, textToFind) ||
-    textToFind2 && FindText(&X, &Y, searchX1, searchY1, searchX2, searchY2, 0.15, 0.15, textToFind2)) {
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    pattern := textToFind2 = "" ? textToFind : textToFind "|" textToFind2
+    loop 6 {
+        if !WorldViewValid(view)
+            return false
+        if !LobbyEntryPattern(view, pattern, [searchX1,searchY1,searchX2,searchY2], &X, &Y)
+            return WorldViewValid(view)
         if (offsetX != 0 || offsetY != 0) {
-            FixClick(X + offsetX, Y + offsetY)
+            clicked := WorldClick(view,X + offsetX,Y + offsetY)
         } else {
-            FixClick(x, y)
+            clicked := WorldClick(view,x,y)
         }
+        if !clicked
+            return false
         Sleep(1000)
     }
+    ProcessLog("A menu remained open after six confirmed clicks")
+    return false
 }
 
 ClickOnce(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0, offsetY := 0, textToFind2 := "") {
@@ -4997,8 +5791,7 @@ ClickOnce(x, y, searchX1, searchY1, searchX2, searchY2, textToFind, offsetX := 0
 global macroRunning := false
 
 StartMacro(*) {
-    global macroRunning, rblxID
-    global successfulCoordinates, BossRoomCompleted, CARD_ACTION_BUSY, CARD_INPUT_BLOCKED
+    global macroRunning, mode, ResultCounted, TransitionCoverMap, DailyQuestMap
 
     if macroRunning {
         ProcessLog("Macro is already running")
@@ -5008,75 +5801,66 @@ StartMacro(*) {
     ProcessLog("F2: starting macro (24/7 continuous run loop)...")
 
     try {
-        if (!ValidateMode()) {
-            macroRunning := false
+        if !ValidateMode()
             return
-        }
 
-        firstRun := true
+        mode := ModeDropdown.Text
         nextStep := "auto"
+        failures := 0
+        ResultCounted := false
+        TransitionCoverMap := ""
+        DailyQuestMap := ""
         while macroRunning {
             try {
-                ; Verify Roblox window exists
-                if !WinExist(rblxID) && !WinExist("ahk_exe RobloxPlayerBeta.exe") && !WinExist("Roblox") {
-                    ProcessLog("Roblox window not found; waiting for game...")
-                    Sleep(3000)
-                    continue
-                }
-                RefreshClientTarget()
-
-                ; Reset per-match global state
-                successfulCoordinates := []
-                ResetSmartPlacementState()
-                BossRoomCompleted := false
-                ClearCardOffer()
-                CARD_ACTION_BUSY := false
-                CARD_INPUT_BLOCKED := false
-
-                res := ""
-                if (nextStep = "replay") {
+                if !(window := RefreshClientTarget()) {
+                    res := RecoverToLobby()
+                } else if nextStep = "replay" {
                     ProcessLog("Seamless Replay / Next Stage: starting stage...")
                     res := RestartStage(ResolveSelectedMap())
-                } else if (nextStep = "lobby" || nextStep = "reconnected") {
-                    ProcessLog("Lobby ready; starting selected mode...")
-                    res := StartSelectedMode()
-                } else if (firstRun) {
-                    firstRun := false
-                    if CapysResultScreenVisible() {
-                        ProcessLog("Starting into active result screen...")
-                        res := MonitorEndScreen()
-                    } else if (FindVoteStart(&vx, &vy) || RegularMatchHudVisible() || SummerMatchStarted()) {
-                        ProcessLog("Starting into active match...")
-                        res := RestartStage()
-                    } else {
-                        ProcessLog("Starting selected mode...")
-                        res := StartSelectedMode()
-                    }
                 } else {
-                    status := CheckLoaded()
+                    if !WinActive("ahk_id " window)
+                        try WinActivate("ahk_id " window)
+                    if CapysResultScreenVisible()
+                        status := "result"
+                    else if IsMacroLobbyVisible() || (mode = "Cursed Womb" && CursedWombKeyPanelVisible())
+                        status := "lobby"
+                    else
+                        status := CheckLoaded()
                     if (status = "lobby" || status = "reconnected") {
-                        ProcessLog("Returned to lobby; automatically starting next match...")
+                        ProcessLog("Lobby ready; starting selected mode...")
                         res := StartSelectedMode()
                     } else if (status = "result") {
-                        ProcessLog("Result screen detected; processing end screen...")
-                        res := MonitorEndScreen()
-                    } else {
-                        ProcessLog("Match loaded; running stage...")
+                        res := HandleStageResult()
+                    } else if status = "loaded" {
                         res := RestartStage()
-                    }
-                }
-
-                if (res = "replay" || res = "lobby" || res = "reconnected") {
-                    nextStep := res
-                } else {
-                    nextStep := "auto"
+                    } else
+                        res := false
                 }
             } catch as innerErr {
-                ProcessLog("Macro loop error: " . innerErr.Message . " @ line " . innerErr.Line)
-                nextStep := "auto"
-                Sleep(2000)
+                ProcessLog("Macro loop error (" Type(innerErr) ") at line " innerErr.Line)
+                res := false
             }
-            Sleep(1000)
+            if res = "complete"
+                break
+            if (res = "replay" || res = "lobby" || res = "reconnected") {
+                nextStep := res
+                failures := 0
+                Sleep(1000)
+                continue
+            }
+            nextStep := "auto"
+            failures := Min(failures + 1, 5)
+            retryMs := Min(30000, 2000 * 2**(failures - 1))
+            ProcessLog("Stage interrupted; checking recovery after " (retryMs // 1000) "s")
+            Sleep(retryMs)
+            if macroRunning {
+                try {
+                    if !IsMacroLobbyVisible() && !CapysResultScreenVisible()
+                        nextStep := RecoverToLobby()
+                }
+                catch as recoveryErr
+                    ProcessLog("Recovery error (" Type(recoveryErr) ") at line " recoveryErr.Line)
+            }
         }
     } catch as err {
         ProcessLog("StartMacro ERROR: " . err.Message . " @ line " . err.Line)
@@ -5244,6 +6028,8 @@ EnsureUpgradeUIOnLeft(settingsAlreadyOpen := false) {
 }
 
 TogglePause(*) {
+    global UpgradePauseEpoch
+    UpgradePauseEpoch++
     Pause -1
     if (A_IsPaused) {
         ProcessLog("Macro paused")
@@ -5274,14 +6060,7 @@ IsColorInRange(color, targetColor, tolerance := 50) {
 ; Custom monitor for dungeon ending
 
 MonitorDungeonEnd() {
-    res := MonitorEndScreen(true)
-    if (res != "replay")
-        return res
-    CheckDungeonSpecials()
-    finishRes := CheckForFinishDungeon()
-    if finishRes
-        return finishRes
-    return SelectDungeonRoute()
+    return MonitorEndScreen()
 }
 
 ; Function to check for special dungeon elements after replay
@@ -5324,44 +6103,32 @@ CheckDungeonSpecials() {
 }
 
 SelectDungeonRoute() {
-    if (ok := FindText(&X, &Y, 140, 180, 480, 350, 0.20, 0.20, BossRoom) or (ok := FindText(&X, &Y, 140, 180, 480, 350,
-        0.20, 0.20, BossRoom2))) {
+    global BossRoom, BossRoom2, Chest, Hoard, Enter, BossRoomCompleted
+    view := LobbyEntryView()
+    if !IsObject(view)
+        return false
+    deadline := A_TickCount + 8000
+    while !DungeonRouteVisible() {
+        if !WorldViewValid(view) || A_TickCount >= deadline
+            return false
+        Sleep(250)
+    }
+    if LobbyEntryPattern(view,BossRoom "|" BossRoom2,[140,180,480,350],&x,&y) {
         ProcessLog("Boss room found!")
-        global BossRoomCompleted := true
-
-        FixClick(X, Y - 30)
+        if !WorldClick(view,x,y-30)
+            return false
+        Sleep(1000)
+        BossRoomCompleted := true
+    } else if LobbyEntryPattern(view,Chest "|" Hoard,[200,350,600,435],&x,&y) {
+        if !WorldClick(view,x,y-30)
+            return false
         Sleep(1000)
     }
-
-    if (ok := FindText(&X, &Y, 200, 350, 600, 435, 0.20, 0.20, Chest)) {
-        ProcessLog("Chest room found; clicking")
-        FixClick(X, Y - 30)
-        Sleep(1000)
-    }
-    else if (ok := FindText(&X, &Y, 200, 350, 600, 435, 0.20, 0.20, Hoard)) {
-        ProcessLog("Hoard Room found; clicking")
-        FixClick(X, Y - 30)
-        Sleep(1000)
-    }
-    else {
-        ; If no chest/hoard found, click default positions
-        ProcessLog("No chest/hoard found; clicking the default position again")
-        FixClick(400, 355)
-        Sleep(500)
-        FixClick(335, 355)
-        Sleep(500)
-    }
-
-    ; Look for Enter button and click until gone
-    if (ok := FindText(&X, &Y, 120, 425, 680, 500, 0.20, 0.20, Enter)) {
-        ProcessLog("Enter button found; entering Dungeon")
-        ClickUntilGone(0, 0, 120, 425, 680, 500, Enter, 0, -30)
-        Sleep(2000)
-
-        ; Start dungeon run
-        ProcessLog("Starting dungeon")
+    if !LobbyEntryPattern(view,Enter,[120,425,680,500],&x,&y) || !WorldClick(view,x,y-30)
+        return false
+    if WaitForResultTransition("replay")
         return "replay"
-    }
+    ProcessLog("Dungeon: room entry was not confirmed")
     return false
 }
 
@@ -5400,32 +6167,32 @@ HandleChestScreen() {
         ProcessLog("Opening available chests")
 
         ; Process first chest position - keep clicking until exhausted
-        firstChestExhausted := false
-        while (!firstChestExhausted) {
+        loop 6 {
             ; Click first chest OPEN button
             ClickOnce(0, 0, 535, 265, 605, 315, OpenChest, -3, -35)
             Sleep(2000)
 
             ; Check if we're still on the chest screen
             if (!IsChestScreenVisible()) {
-                ClaimChestReward()
+                if !ClaimChestReward()
+                    return false
             } else {
-                firstChestExhausted := true
+                break
             }
         }
 
         ; Process second chest position - keep clicking until exhausted
-        secondChestExhausted := false
-        while (!secondChestExhausted) {
+        loop 6 {
             ; Click second chest OPEN button
             ClickOnce(0, 0, 530, 330, 605, 375, OpenChest, -3, -35)
             Sleep(1000)
 
             ; Check if we're still on the chest screen
             if (!IsChestScreenVisible()) {
-                ClaimChestReward()
+                if !ClaimChestReward()
+                    return false
             } else {
-                secondChestExhausted := true
+                break
             }
         }
         ProcessLog("All chests opened")
@@ -5449,8 +6216,10 @@ ClaimChestReward() {
     maxClicks := 30  ; Safety limit
     clicks := 0
     while (clicks < maxClicks) {
-        ; Click to claim reward
-        FixClick(560, 560)
+        if !CapysReadReward() || !IsObject(view := LobbyEntryView())
+            return false
+        if !WorldClick(view,560,560)
+            return false
         Sleep(500)
 
         ; Check if chest screen has returned
@@ -5459,7 +6228,7 @@ ClaimChestReward() {
         }
         clicks++
     }
-    ProcessLog("All rewards collected")
+    ProcessLog("Dungeon: chest reward remained open")
     return false
 }
 
